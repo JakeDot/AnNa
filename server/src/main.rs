@@ -25,6 +25,7 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing::{info, warn};
+use uuid::Uuid;
 
 mod database;
 mod signaling;
@@ -52,7 +53,7 @@ struct PeerInfo {
     files: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct FileMetadata {
     hash: String,
     name: String,
@@ -104,6 +105,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting ãnn@sync server...");
 
+    // Read configuration from environment
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(3000);
+
+    let public_dir = std::env::var("PUBLIC_DIR").unwrap_or_else(|_| "./public".to_string());
+
     // Initialize database
     let db = Database::new("./data/metadata.db").await?;
     db.init().await?;
@@ -134,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
         // WebSocket signaling
         .route("/ws", get(websocket_handler))
         // Static files
-        .nest_service("/", ServeDir::new("../public"))
+        .nest_service("/", ServeDir::new(&public_dir))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE))
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive())
@@ -142,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     // Bind and serve
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -187,9 +196,11 @@ async fn upload_file(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResponse>, ErrorResponse> {
-    let mut file_data: Option<Vec<u8>> = None;
+    let mut temp_file_path: Option<PathBuf> = None;
     let mut filename: Option<String> = None;
     let mut mime_type = "application/octet-stream".to_string();
+    let mut hasher = Sha256::new();
+    let mut file_size: u64 = 0;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| ErrorResponse {
         error: format!("Multipart error: {}", e),
@@ -203,43 +214,78 @@ async fn upload_file(
                     .content_type()
                     .unwrap_or("application/octet-stream")
                     .to_string();
-                let data = field.bytes().await.map_err(|e| ErrorResponse {
-                    error: format!("Failed to read file: {}", e),
+
+                // Create a temporary file to stream the upload
+                let temp_dir = std::env::temp_dir();
+                let temp_name = format!("upload-{}.tmp", uuid::Uuid::new_v4());
+                let temp_path = temp_dir.join(temp_name);
+
+                let mut temp_file = File::create(&temp_path).await.map_err(|e| ErrorResponse {
+                    error: format!("Failed to create temp file: {}", e),
                 })?;
-                file_data = Some(data.to_vec());
+
+                // Stream the field data to disk while computing hash
+                let mut stream = field;
+                while let Some(chunk) = stream.chunk().await.map_err(|e| ErrorResponse {
+                    error: format!("Failed to read chunk: {}", e),
+                })? {
+                    hasher.update(&chunk);
+                    file_size += chunk.len() as u64;
+                    temp_file.write_all(&chunk).await.map_err(|e| ErrorResponse {
+                        error: format!("Failed to write to temp file: {}", e),
+                    })?;
+                }
+
+                temp_file.sync_all().await.map_err(|e| ErrorResponse {
+                    error: format!("Failed to sync temp file: {}", e),
+                })?;
+                drop(temp_file);
+
+                temp_file_path = Some(temp_path);
             }
             _ => {}
         }
     }
 
-    let file_data = file_data.ok_or_else(|| ErrorResponse {
+    let temp_path = temp_file_path.ok_or_else(|| ErrorResponse {
         error: "No file provided".to_string(),
     })?;
 
     let filename = filename.unwrap_or_else(|| "unnamed".to_string());
-    let size = file_data.len() as u64;
-
-    // Calculate hash
-    let mut hasher = Sha256::new();
-    hasher.update(&file_data);
     let hash = hex::encode(hasher.finalize());
 
     // Check if file already exists (deduplication)
     if state.storage.file_exists(&hash).await {
+        // Clean up temp file
+        let _ = fs::remove_file(&temp_path).await;
+
         info!("File {} already exists (deduplicated)", hash);
         return Ok(Json(UploadResponse {
             status: "exists".to_string(),
             hash: hash.clone(),
-            size,
+            size: file_size,
         }));
     }
+
+    // Read the temp file back
+    let mut temp_file = File::open(&temp_path).await.map_err(|e| ErrorResponse {
+        error: format!("Failed to open temp file: {}", e),
+    })?;
+
+    let mut file_data = Vec::new();
+    temp_file.read_to_end(&mut file_data).await.map_err(|e| ErrorResponse {
+        error: format!("Failed to read temp file: {}", e),
+    })?;
+
+    // Clean up temp file
+    let _ = fs::remove_file(&temp_path).await;
 
     // Determine if we should compress
     let should_compress = should_compress_file(&mime_type);
     let compressed_data = if should_compress {
         compress_data(&file_data).await?
     } else {
-        file_data.clone()
+        file_data
     };
 
     // Save file
@@ -248,13 +294,13 @@ async fn upload_file(
     })?;
 
     // Calculate chunks
-    let chunk_count = ((size + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64) as u32;
+    let chunk_count = ((file_size + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64) as u32;
 
     // Save metadata
     let metadata = FileMetadata {
         hash: hash.clone(),
         name: filename,
-        size,
+        size: file_size,
         mime_type,
         uploaded_at: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -273,12 +319,12 @@ async fn upload_file(
         state.chunk_tracker.add_chunk(&hash, i);
     }
 
-    info!("File uploaded successfully: {} ({})", hash, size);
+    info!("File uploaded successfully: {} ({} bytes)", hash, file_size);
 
     Ok(Json(UploadResponse {
         status: "success".to_string(),
         hash,
-        size,
+        size: file_size,
     }))
 }
 
@@ -337,6 +383,18 @@ async fn get_chunk(
     };
 
     let start = (chunk_id as usize) * CHUNK_SIZE;
+
+    // Guard against start exceeding data length
+    if start >= decompressed.len() {
+        return Err(ErrorResponse {
+            error: format!(
+                "Chunk start offset {} exceeds file size {}",
+                start,
+                decompressed.len()
+            ),
+        });
+    }
+
     let end = std::cmp::min(start + CHUNK_SIZE, decompressed.len());
     let chunk = decompressed[start..end].to_vec();
 

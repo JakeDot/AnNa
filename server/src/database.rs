@@ -25,99 +25,132 @@ impl Database {
     }
 
     pub async fn init(&self) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS files (
-                hash TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                mime_type TEXT NOT NULL,
-                uploaded_at INTEGER NOT NULL,
-                chunk_count INTEGER NOT NULL,
-                compressed INTEGER NOT NULL
-            )",
-            [],
-        )?;
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS files (
+                    hash TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    uploaded_at INTEGER NOT NULL,
+                    chunk_count INTEGER NOT NULL,
+                    compressed INTEGER NOT NULL
+                )",
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_uploaded_at ON files(uploaded_at DESC)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploaded_at ON files(uploaded_at DESC)",
+                [],
+            )?;
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .await??;
 
         Ok(())
     }
 
     pub async fn save_file(&self, metadata: &FileMetadata) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        let metadata = metadata.clone();
 
-        conn.execute(
-            "INSERT OR REPLACE INTO files (hash, name, size, mime_type, uploaded_at, chunk_count, compressed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                metadata.hash,
-                metadata.name,
-                metadata.size as i64,
-                metadata.mime_type,
-                metadata.uploaded_at,
-                metadata.chunk_count,
-                metadata.compressed as i32,
-            ],
-        )?;
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
+
+            conn.execute(
+                "INSERT OR REPLACE INTO files (hash, name, size, mime_type, uploaded_at, chunk_count, compressed)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    metadata.hash,
+                    metadata.name,
+                    metadata.size as i64,
+                    metadata.mime_type,
+                    metadata.uploaded_at,
+                    metadata.chunk_count,
+                    metadata.compressed as i32,
+                ],
+            )?;
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .await??;
 
         Ok(())
     }
 
     pub async fn get_file(&self, hash: &str) -> Result<FileMetadata> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        let hash = hash.to_string();
 
-        let mut stmt = conn.prepare(
-            "SELECT hash, name, size, mime_type, uploaded_at, chunk_count, compressed
-             FROM files WHERE hash = ?1"
-        )?;
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
 
-        let metadata = stmt.query_row(params![hash], |row| {
-            Ok(FileMetadata {
-                hash: row.get(0)?,
-                name: row.get(1)?,
-                size: row.get::<_, i64>(2)? as u64,
-                mime_type: row.get(3)?,
-                uploaded_at: row.get(4)?,
-                chunk_count: row.get(5)?,
-                compressed: row.get::<_, i32>(6)? != 0,
-            })
-        })?;
+            let mut stmt = conn.prepare(
+                "SELECT hash, name, size, mime_type, uploaded_at, chunk_count, compressed
+                 FROM files WHERE hash = ?1"
+            )?;
 
-        Ok(metadata)
+            let metadata = stmt.query_row(params![hash], |row| {
+                Ok(FileMetadata {
+                    hash: row.get(0)?,
+                    name: row.get(1)?,
+                    size: row.get::<_, i64>(2)? as u64,
+                    mime_type: row.get(3)?,
+                    uploaded_at: row.get(4)?,
+                    chunk_count: row.get(5)?,
+                    compressed: row.get::<_, i32>(6)? != 0,
+                })
+            })?;
+
+            Ok::<FileMetadata, anyhow::Error>(metadata)
+        })
+        .await?
     }
 
     pub async fn list_files(&self) -> Result<Vec<FileMetadata>> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
 
-        let mut stmt = conn.prepare(
-            "SELECT hash, name, size, mime_type, uploaded_at, chunk_count, compressed
-             FROM files ORDER BY uploaded_at DESC"
-        )?;
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
 
-        let files = stmt.query_map([], |row| {
-            Ok(FileMetadata {
-                hash: row.get(0)?,
-                name: row.get(1)?,
-                size: row.get::<_, i64>(2)? as u64,
-                mime_type: row.get(3)?,
-                uploaded_at: row.get(4)?,
-                chunk_count: row.get(5)?,
-                compressed: row.get::<_, i32>(6)? != 0,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut stmt = conn.prepare(
+                "SELECT hash, name, size, mime_type, uploaded_at, chunk_count, compressed
+                 FROM files ORDER BY uploaded_at DESC"
+            )?;
 
-        Ok(files)
+            let files = stmt.query_map([], |row| {
+                Ok(FileMetadata {
+                    hash: row.get(0)?,
+                    name: row.get(1)?,
+                    size: row.get::<_, i64>(2)? as u64,
+                    mime_type: row.get(3)?,
+                    uploaded_at: row.get(4)?,
+                    chunk_count: row.get(5)?,
+                    compressed: row.get::<_, i32>(6)? != 0,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            Ok::<Vec<FileMetadata>, anyhow::Error>(files)
+        })
+        .await?
     }
 
     pub async fn delete_file(&self, hash: &str) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute("DELETE FROM files WHERE hash = ?1", params![hash])?;
+        let db_path = self.db_path.clone();
+        let hash = hash.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
+            conn.execute("DELETE FROM files WHERE hash = ?1", params![hash])?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .await??;
+
         Ok(())
     }
 }

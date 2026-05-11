@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { io, Socket } from 'socket.io-client'
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000'
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws'
 
 interface Peer {
   id: string
@@ -9,72 +8,126 @@ interface Peer {
   files: string[]
 }
 
+interface WebSocketMessage {
+  type: string
+  [key: string]: any
+}
+
 export function useWebSocket() {
   const [connected, setConnected] = useState(false)
   const [peers, setPeers] = useState<Peer[]>([])
   const [peerId, setPeerId] = useState<string | null>(null)
-  const socketRef = useRef<Socket | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const reconnectTimeoutRef = useRef<number | undefined>(undefined)
+  const connectRef = useRef<(() => void) | null>(null)
 
-  useEffect(() => {
-    // Connect to WebSocket
-    const socket = io(WS_URL, {
-      transports: ['websocket'],
-    })
+  const connect = useCallback(() => {
+    try {
+      const socket = new WebSocket(WS_URL)
+      socketRef.current = socket
 
-    socketRef.current = socket
+      socket.onopen = () => {
+        console.log('WebSocket connected')
+        setConnected(true)
+      }
 
-    socket.on('connect', () => {
-      console.log('WebSocket connected')
-      setConnected(true)
-    })
+      socket.onclose = () => {
+        console.log('WebSocket disconnected')
+        setConnected(false)
+        socketRef.current = null
 
-    socket.on('disconnect', () => {
-      console.log('WebSocket disconnected')
-      setConnected(false)
-    })
+        // Attempt to reconnect after 3 seconds
+        reconnectTimeoutRef.current = window.setTimeout(() => {
+          console.log('Attempting to reconnect...')
+          connectRef.current?.()
+        }, 3000)
+      }
 
-    socket.on('welcome', (data: { peer_id: string }) => {
-      console.log('Received peer ID:', data.peer_id)
-      setPeerId(data.peer_id)
-    })
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error)
+      }
 
-    socket.on('peer-list', (data: { peers: string[] }) => {
-      console.log('Peer list updated:', data.peers)
-      // Convert peer IDs to Peer objects (simplified)
-      const peerObjects: Peer[] = data.peers.map((id) => ({
-        id,
-        connected_at: Date.now(),
-        files: [],
-      }))
-      setPeers(peerObjects)
-    })
+      socket.onmessage = (event) => {
+        try {
+          const message: WebSocketMessage = JSON.parse(event.data)
+          console.log('Received message:', message)
 
-    socket.on('signal', (data: any) => {
-      console.log('Received signal:', data)
-      // Handle WebRTC signaling
-    })
+          switch (message.type) {
+            case 'welcome':
+              setPeerId(message.peer_id)
+              console.log('Received peer ID:', message.peer_id)
+              break
 
-    socket.on('chunk-peers', (data: { file_hash: string; chunk_id: number; peers: string[] }) => {
-      console.log('Chunk peers:', data)
-      // Handle chunk peer information
-    })
+            case 'peer-list':
+              // Convert peer IDs to Peer objects
+              const peerObjects: Peer[] = message.peers.map((id: string) => ({
+                id,
+                connected_at: Date.now(),
+                files: [],
+              }))
+              setPeers(peerObjects)
+              console.log('Peer list updated:', message.peers)
+              break
 
-    return () => {
-      socket.disconnect()
+            case 'signal':
+              console.log('Received signal:', message)
+              // Handle WebRTC signaling
+              break
+
+            case 'chunk-peers':
+              console.log('Chunk peers:', message)
+              // Handle chunk peer information
+              break
+
+            case 'error':
+              console.error('Server error:', message.message)
+              break
+
+            default:
+              console.warn('Unknown message type:', message.type)
+          }
+        } catch (error) {
+          console.error('Failed to parse message:', error)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error)
     }
   }, [])
 
-  const sendMessage = useCallback((message: any) => {
+  connectRef.current = connect
+
+  useEffect(() => {
+    connect()
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+      if (socketRef.current) {
+        socketRef.current.close()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const sendMessage = useCallback((message: WebSocketMessage) => {
     if (socketRef.current && connected) {
-      socketRef.current.emit('message', message)
+      socketRef.current.send(JSON.stringify(message))
     }
   }, [connected])
 
   const joinRoom = useCallback((room: string) => {
-    if (socketRef.current && connected) {
-      socketRef.current.emit('join', { room })
-    }
-  }, [connected])
+    sendMessage({ type: 'join', room })
+  }, [sendMessage])
+
+  const announceFiles = useCallback((files: string[]) => {
+    sendMessage({ type: 'announce', files })
+  }, [sendMessage])
+
+  const requestChunk = useCallback((file_hash: string, chunk_id: number) => {
+    sendMessage({ type: 'request-chunk', file_hash, chunk_id })
+  }, [sendMessage])
 
   return {
     connected,
@@ -82,5 +135,7 @@ export function useWebSocket() {
     peerId,
     sendMessage,
     joinRoom,
+    announceFiles,
+    requestChunk,
   }
 }

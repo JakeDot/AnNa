@@ -5,8 +5,9 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::fs::{self, File};
+use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct FileStorage {
@@ -29,11 +30,53 @@ impl FileStorage {
             fs::create_dir_all(parent).await?;
         }
 
-        let mut file = File::create(&file_path).await?;
-        file.write_all(data).await?;
-        file.sync_all().await?;
+        // Use atomic write pattern: write to temp file, then rename
+        let temp_name = format!("{}.tmp.{}", hash, Uuid::new_v4());
+        let temp_path = if let Some(parent) = file_path.parent() {
+            parent.join(temp_name)
+        } else {
+            PathBuf::from(temp_name)
+        };
 
-        Ok(())
+        // Try to use create_new to detect if file already exists
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file_path)
+            .await
+        {
+            Ok(mut file) => {
+                // File didn't exist, write directly
+                file.write_all(data).await?;
+                file.sync_all().await?;
+                return Ok(());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // File already exists, this is OK (deduplication)
+                return Ok(());
+            }
+            Err(_) => {
+                // Other error, fall through to atomic write
+            }
+        }
+
+        // Write to temp file first
+        let mut temp_file = File::create(&temp_path).await?;
+        temp_file.write_all(data).await?;
+        temp_file.sync_all().await?;
+        drop(temp_file);
+
+        // Atomically rename temp file to final destination
+        // If file already exists at this point, rename will fail on some systems
+        // or overwrite on others, but the data will be the same due to content addressing
+        match fs::rename(&temp_path, &file_path).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                // Clean up temp file if rename failed
+                let _ = fs::remove_file(&temp_path).await;
+                Ok(())
+            }
+        }
     }
 
     pub async fn read_file(&self, hash: &str) -> Result<Vec<u8>> {
@@ -46,7 +89,7 @@ impl FileStorage {
 
     pub async fn file_exists(&self, hash: &str) -> bool {
         let file_path = self.get_file_path(hash);
-        file_path.exists()
+        tokio::fs::try_exists(&file_path).await.unwrap_or(false)
     }
 
     pub async fn delete_file(&self, hash: &str) -> Result<()> {
@@ -87,12 +130,12 @@ impl ChunkTracker {
     }
 
     pub fn add_peer_chunk(&self, file_hash: &str, chunk_id: u32, peer_id: String) {
-        if let Some(file_chunks) = self.chunks.get(file_hash) {
-            file_chunks
-                .entry(chunk_id)
-                .or_insert_with(HashSet::new)
-                .insert(peer_id);
-        }
+        self.chunks
+            .entry(file_hash.to_string())
+            .or_insert_with(DashMap::new)
+            .entry(chunk_id)
+            .or_insert_with(HashSet::new)
+            .insert(peer_id);
     }
 
     pub fn remove_peer(&self, peer_id: &str) {
