@@ -47,21 +47,20 @@ pub async fn compute_chunks(path: impl AsRef<Path>) -> Result<Vec<ChunkBoundary>
         let chunker = StreamCDC::new(file, CDC_MIN_SIZE, CDC_AVG_SIZE, CDC_MAX_SIZE);
 
         let mut boundaries = Vec::new();
-        let mut chunk_id: u32 = 0;
 
-        for result in chunker {
+        for (chunk_id, result) in chunker.enumerate() {
             let chunk = result.map_err(|e| anyhow::anyhow!("CDC error: {e}"))?;
+            let chunk_id = chunk_id as u32;
 
             // BLAKE3: same output length as SHA-256 (64 hex chars), ~3× faster.
             let hash = blake3::hash(&chunk.data).to_hex().to_string();
 
             boundaries.push(ChunkBoundary {
                 chunk_id,
-                offset: chunk.offset as u64,
+                offset: chunk.offset,
                 length: chunk.length as u32,
                 hash,
             });
-            chunk_id += 1;
         }
 
         Ok::<Vec<ChunkBoundary>, anyhow::Error>(boundaries)

@@ -7,8 +7,8 @@ use std::{
     sync::RwLock,
 };
 use tokio::{
-    fs::{self, File, OpenOptions},
-    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    fs::{self, File},
+    io::{AsyncReadExt, AsyncSeekExt},
 };
 use uuid::Uuid;
 
@@ -68,51 +68,6 @@ impl FileStorage {
         Ok(())
     }
 
-    /// Write `data` to the content-addressed location for `hash`.
-    /// Uses an atomic write pattern (create_new → write → sync → rename)
-    /// so concurrent uploads of the same hash are safe.
-    pub async fn save_file(&self, hash: &str, data: &[u8]) -> Result<()> {
-        let file_path = self.get_file_path(hash);
-
-        if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-
-        // create_new: if the file already exists we can stop immediately.
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file_path)
-            .await
-        {
-            Ok(mut f) => {
-                f.write_all(data).await?;
-                f.sync_all().await?;
-                return Ok(());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
-            Err(_) => {}
-        }
-
-        // create_new failed for a reason other than AlreadyExists – fall back
-        // to the sibling-temp + rename pattern.
-        let temp_path = if let Some(parent) = file_path.parent() {
-            parent.join(format!("{}.tmp.{}", hash, Uuid::new_v4()))
-        } else {
-            PathBuf::from(format!("{}.tmp.{}", hash, Uuid::new_v4()))
-        };
-
-        let mut tmp = File::create(&temp_path).await?;
-        tmp.write_all(data).await?;
-        tmp.sync_all().await?;
-        drop(tmp);
-
-        if fs::rename(&temp_path, &file_path).await.is_err() {
-            let _ = fs::remove_file(&temp_path).await;
-        }
-        Ok(())
-    }
-
     // ---------------------------------------------------------------- readers
 
     /// Read `length` bytes starting at `offset` from the stored file for
@@ -142,6 +97,10 @@ impl FileStorage {
             .unwrap_or(false)
     }
 
+    /// Remove the stored file for `hash` from disk.
+    ///
+    /// Called by the admin delete endpoint (not yet wired in routes).
+    #[allow(dead_code)]
     pub async fn delete_file(&self, hash: &str) -> Result<()> {
         fs::remove_file(self.get_file_path(hash)).await?;
         Ok(())
@@ -167,6 +126,12 @@ impl FileStorage {
 /// Missing → Requested → Downloading → Verified
 ///                ↓ (timeout / error)
 ///             Missing
+///
+/// This state machine is maintained per-file on each downloading client and
+/// used by the rarest-first scheduler to avoid duplicate requests.  The server
+/// side stores it in `ChunkTracker::chunk_states` so the signaling handler can
+/// update and query states without holding a lock on the entire peer map.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChunkState {
@@ -195,6 +160,9 @@ pub struct ChunkTracker {
     /// file_hash → chunk_id → set of peer IDs that have this chunk.
     peer_chunks: DashMap<String, DashMap<u32, std::collections::HashSet<String>>>,
     /// Per-peer download state machine: file_hash → (chunk_id → ChunkState).
+    /// Used by the rarest-first scheduler to track in-flight requests and avoid
+    /// requesting the same chunk from multiple peers simultaneously.
+    #[allow(dead_code)]
     chunk_states: DashMap<String, RwLock<HashMap<u32, ChunkState>>>,
 }
 
@@ -212,7 +180,7 @@ impl ChunkTracker {
     pub fn add_chunk(&self, file_hash: &str, chunk_id: u32) {
         self.peer_chunks
             .entry(file_hash.to_string())
-            .or_insert_with(DashMap::new)
+            .or_default()
             .insert(chunk_id, std::collections::HashSet::new());
     }
 
@@ -220,9 +188,9 @@ impl ChunkTracker {
     pub fn add_peer_chunk(&self, file_hash: &str, chunk_id: u32, peer_id: String) {
         self.peer_chunks
             .entry(file_hash.to_string())
-            .or_insert_with(DashMap::new)
+            .or_default()
             .entry(chunk_id)
-            .or_insert_with(std::collections::HashSet::new)
+            .or_default()
             .insert(peer_id);
     }
 
@@ -251,7 +219,7 @@ impl ChunkTracker {
         let file_chunks = self
             .peer_chunks
             .entry(file_hash.to_string())
-            .or_insert_with(DashMap::new);
+            .or_default();
 
         let peer_str = peer_id.to_string();
 
@@ -265,7 +233,7 @@ impl ChunkTracker {
                 if byte & (1 << (7 - bit)) != 0 {
                     file_chunks
                         .entry(chunk_id)
-                        .or_insert_with(std::collections::HashSet::new)
+                        .or_default()
                         .insert(peer_str.clone());
                 }
             }
@@ -367,6 +335,10 @@ impl ChunkTracker {
     // ------------------------------------------------------- state machine
 
     /// Update the state of a chunk for a given file.
+    ///
+    /// Called by the rarest-first scheduler when a chunk request is dispatched
+    /// to a peer, transitioning the state from `Missing` → `Requested`.
+    #[allow(dead_code)]
     pub fn set_chunk_state(&self, file_hash: &str, chunk_id: u32, state: ChunkState) {
         self.chunk_states
             .entry(file_hash.to_string())
@@ -377,6 +349,7 @@ impl ChunkTracker {
     }
 
     /// Read the current state of a chunk.
+    #[allow(dead_code)]
     pub fn get_chunk_state(&self, file_hash: &str, chunk_id: u32) -> ChunkState {
         self.chunk_states
             .get(file_hash)

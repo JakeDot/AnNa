@@ -166,6 +166,10 @@ impl Database {
         .await?
     }
 
+    /// Delete a file's metadata record from the database.
+    ///
+    /// Called by the admin delete endpoint (not yet wired in routes).
+    #[allow(dead_code)]
     pub async fn delete_file(&self, hash: &str) -> Result<()> {
         let pool = self.pool.clone();
         let hash = hash.to_string();
