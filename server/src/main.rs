@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod cdc;
 mod database;
+mod quic;
 mod signaling;
 mod storage;
 

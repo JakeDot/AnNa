@@ -39,6 +39,20 @@ fastcdc = "3.1"
 brotli = "3.5"
 async-compression = { version = "0.4", features = ["tokio", "brotli", "zstd"] }
 
+# QUIC / HTTP3
+# quinn: QUIC transport layer (RFC 9000)
+# h3: HTTP/3 framing over QUIC streams
+# h3-quinn: binds h3 to quinn's async stream API
+# h3-axum: bridges h3 connection acceptance to Axum's Router
+quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.8"
+h3-axum = "0.2"
+
+# TLS (required by QUIC; rcgen generates a self-signed cert at startup)
+rustls = { version = "0.23", features = ["ring"] }
+rcgen = "0.13"
+
 # Logging and tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
