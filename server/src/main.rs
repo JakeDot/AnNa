@@ -224,7 +224,8 @@ async fn upload_file(
 
         // Stream the upload to a temp file on disk.
         // We never load the entire body into memory.
-        let temp_path = std::env::temp_dir().join(format!("anna-upload-{}.tmp", Uuid::new_v4()));
+        let temp_path =
+            std::env::temp_dir().join(format!("anna-sync-upload-{}.tmp", Uuid::new_v4()));
         let mut temp_file = File::create(&temp_path).await.map_err(|e| ErrorResponse {
             error: format!("Failed to create temp file: {e}"),
         })?;

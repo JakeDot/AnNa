@@ -28,6 +28,14 @@ impl Database {
 
         let manager = SqliteConnectionManager::file(path_ref).with_init(|conn| {
             conn.execute_batch(
+                // WAL journal mode: readers and the writer never block each other.
+                // NORMAL synchronous: WAL checkpoints are still durable; we avoid
+                // the overhead of full-fsync on every write.
+                // cache_size: 10 000 pages ≈ 40 MB of page cache per connection.
+                // busy_timeout 5 000 ms: SQLite retries on lock contention for up
+                // to 5 s before returning SQLITE_BUSY, which avoids spurious
+                // errors under short write bursts without blocking the OS thread
+                // indefinitely (spawn_blocking releases the async thread).
                 "PRAGMA journal_mode=WAL;
                  PRAGMA synchronous=NORMAL;
                  PRAGMA cache_size=10000;

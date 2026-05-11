@@ -192,9 +192,14 @@ async fn handle_message(
                     "from": peer_id,
                     "signal": signal,
                 });
-                // If the target's channel is full / disconnected, ignore rather
-                // than returning an error that would kill the sender's loop.
-                let _ = target_tx.send(serde_json::to_string(&forward)?);
+                match serde_json::to_string(&forward) {
+                    Ok(msg) => {
+                        if target_tx.send(msg).is_err() {
+                            warn!("Signal from {} to {} dropped: target channel closed", peer_id, to);
+                        }
+                    }
+                    Err(e) => warn!("Failed to serialize signal from {} to {}: {}", peer_id, to, e),
+                }
             } else {
                 let err = serde_json::json!({
                     "type": "error",

@@ -372,7 +372,7 @@ impl ChunkTracker {
             .entry(file_hash.to_string())
             .or_insert_with(|| RwLock::new(HashMap::new()))
             .write()
-            .unwrap()
+            .expect("ChunkTracker state RwLock should never be poisoned")
             .insert(chunk_id, state);
     }
 
@@ -380,7 +380,12 @@ impl ChunkTracker {
     pub fn get_chunk_state(&self, file_hash: &str, chunk_id: u32) -> ChunkState {
         self.chunk_states
             .get(file_hash)
-            .and_then(|lock| lock.read().ok().and_then(|m| m.get(&chunk_id).copied()))
+            .and_then(|lock| {
+                lock.read()
+                    .expect("ChunkTracker state RwLock should never be poisoned")
+                    .get(&chunk_id)
+                    .copied()
+            })
             .unwrap_or(ChunkState::Missing)
     }
 }
