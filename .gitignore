@@ -1,0 +1,37 @@
+# Data directories
+data/
+uploads/
+*.db
+*.db-*
+
+# Rust
+/server/target/
+/server/Cargo.lock
+
+# Node
+/client/node_modules/
+/client/dist/
+/client/.vite/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
