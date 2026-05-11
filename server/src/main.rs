@@ -35,6 +35,9 @@ use storage::{ChunkTracker, FileStorage};
 /// Maximum single upload size (10 GB).
 const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024 * 1024;
 
+/// How long (in seconds) HTTP/3-capable clients should cache the Alt-Svc hint.
+const ALT_SVC_MAX_AGE_SECS: u32 = 86400;
+
 #[derive(Clone)]
 struct AppState {
     db: Database,
@@ -141,7 +144,9 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Main application router (TCP + HTTP1.1/2) ─────────────────────────────
     // Build Alt-Svc header value once; it never changes at runtime.
-    let alt_svc_value = format!("h3=\":{port}\"; ma=86400, h3-29=\":{port}\"; ma=86400");
+    let alt_svc_value = format!(
+        "h3=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}, h3-29=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}"
+    );
     let alt_svc_header_value = alt_svc_value.parse::<header::HeaderValue>()
         .expect("Alt-Svc header value is always valid ASCII");
 

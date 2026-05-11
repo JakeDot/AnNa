@@ -16,8 +16,7 @@ export const AdminPanel: React.FC = () => {
       setStatus(data)
       setError(null)
       setLastUpdated(new Date())
-      // If active QUIC connections exist the request likely came over H3
-      setIsH3(data.active_quic_connections > 0)
+      setIsH3(data.quic_enabled)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
     }

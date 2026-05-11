@@ -24,6 +24,8 @@ export interface ServerStatus {
   total_chunk_count: number
   active_quic_connections: number
   total_quic_connections: number
+  /** True when the server has QUIC/HTTP3 listeners active. */
+  quic_enabled: boolean
   files: FileStats[]
   peers: PeerStats[]
 }

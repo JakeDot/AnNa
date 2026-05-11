@@ -87,6 +87,10 @@ pub struct ServerStatus {
     pub total_chunk_count: u64,
     pub active_quic_connections: u64,
     pub total_quic_connections: u64,
+    /// Always `true` — indicates that the server has QUIC/HTTP3 listeners
+    /// active.  Clients can use this to show a "QUIC available" badge
+    /// regardless of which transport the current request arrived on.
+    pub quic_enabled: bool,
     pub files: Vec<FileStats>,
     pub peers: Vec<PeerStats>,
 }
@@ -170,6 +174,7 @@ pub async fn status_handler(State(state): State<AppState>) -> Json<ServerStatus>
             .metrics
             .total_quic_connections
             .load(Ordering::Relaxed),
+        quic_enabled: true, // QUIC listeners are always started alongside the server
         files,
         peers,
     })
