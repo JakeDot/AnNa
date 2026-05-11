@@ -23,11 +23,13 @@ mod cdc;
 mod database;
 mod quic;
 mod signaling;
+mod status;
 mod storage;
 
 use cdc::compute_chunks;
 use database::Database;
 use signaling::handle_websocket;
+use status::{status_handler, ServerMetrics};
 use storage::{ChunkTracker, FileStorage};
 
 /// Maximum single upload size (10 GB).
@@ -42,6 +44,8 @@ struct AppState {
     /// Outgoing message channel for each connected peer.
     /// Populated on WebSocket connect, removed on disconnect.
     peer_channels: Arc<DashMap<String, UnboundedSender<String>>>,
+    /// Live server metrics (uptime, QUIC connection counts, etc.)
+    metrics: Arc<ServerMetrics>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -111,6 +115,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(3000);
 
+    // Dedicated QUIC management port (UDP). Default: 4433.
+    let mgmt_port = std::env::var("MGMT_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(4433);
+
     let public_dir = std::env::var("PUBLIC_DIR").unwrap_or_else(|_| "./public".to_string());
 
     let db = Database::new("./data/metadata.db").await?;
@@ -118,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
 
     let storage = FileStorage::new("./data/uploads").await?;
     let chunk_tracker = Arc::new(ChunkTracker::new());
+    let metrics = ServerMetrics::new();
 
     let state = AppState {
         db,
@@ -125,7 +136,14 @@ async fn main() -> anyhow::Result<()> {
         chunk_tracker,
         peers: Arc::new(DashMap::new()),
         peer_channels: Arc::new(DashMap::new()),
+        metrics: metrics.clone(),
     };
+
+    // ── Main application router (TCP + HTTP1.1/2) ─────────────────────────────
+    // Build Alt-Svc header value once; it never changes at runtime.
+    let alt_svc_value = format!("h3=\":{port}\"; ma=86400, h3-29=\":{port}\"; ma=86400");
+    let alt_svc_header_value = alt_svc_value.parse::<header::HeaderValue>()
+        .expect("Alt-Svc header value is always valid ASCII");
 
     let app = Router::new()
         .route("/api/files/check/{hash}", get(check_file))
@@ -135,16 +153,53 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/chunk/{hash}/{chunk_id}", get(get_chunk))
         .route("/api/chunks/{hash}", get(list_chunks))
         .route("/api/peers", get(list_peers))
+        .route("/api/status", get(status_handler))
         .route("/ws", get(websocket_handler))
         .nest_service("/", ServeDir::new(&public_dir))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE))
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        // Advertise HTTP/3 on every TCP response so browsers can upgrade.
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("alt-svc"),
+            alt_svc_header_value,
+        ))
+        .with_state(state.clone());
 
+    // ── QUIC management router (UDP — status / admin only) ────────────────────
+    let mgmt_router = Router::new()
+        .route("/api/status", get(status_handler))
+        .layer(CorsLayer::permissive())
+        .with_state(state.clone());
+
+    // ── Spawn QUIC listeners ──────────────────────────────────────────────────
+    let quic_addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let mgmt_addr = SocketAddr::from(([0, 0, 0, 0], mgmt_port));
+
+    // Clone `app` before any moves so the TCP listener retains ownership.
+    let app_for_quic = app.clone();
+    tokio::spawn({
+        let m = metrics.clone();
+        async move {
+            if let Err(e) = quic::serve_quic(quic_addr, app_for_quic, m).await {
+                tracing::error!("QUIC listener error: {e}");
+            }
+        }
+    });
+
+    tokio::spawn({
+        let m = metrics.clone();
+        async move {
+            if let Err(e) = quic::serve_quic_mgmt(mgmt_addr, mgmt_router, m).await {
+                tracing::error!("QUIC management listener error: {e}");
+            }
+        }
+    });
+
+    // ── TCP listener (HTTP/1.1 + HTTP/2) ─────────────────────────────────────
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("Server listening on {}", addr);
+    info!("HTTP/1.1+2 listener on tcp:{port}  |  QUIC/HTTP3 on udp:{port}  |  QUIC management on udp:{mgmt_port}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

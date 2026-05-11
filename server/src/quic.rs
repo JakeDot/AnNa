@@ -1,74 +1,92 @@
 //! QUIC / HTTP3 transport layer.
 //!
-//! This module starts a UDP endpoint (via Quinn) that accepts HTTP/3
-//! connections.  Every incoming request is routed through the exact same
-//! Axum `Router` that handles the existing TCP/HTTP1.1+HTTP2 traffic, so no
-//! handler code needs to be duplicated.
+//! Exposes two public functions:
+//!
+//! * [`serve_quic`] — accepts HTTP/3 connections and routes them through the
+//!   main Axum `Router` (same handlers as the TCP listener).
+//!
+//! * [`serve_quic_mgmt`] — a dedicated management endpoint that routes through
+//!   a *separate* router containing only status / admin handlers.  This is the
+//!   transport for the management UI.
 //!
 //! # TLS
 //! QUIC mandates TLS 1.3.  In development / self-hosted deployments the
 //! module generates a **self-signed certificate** at startup using `rcgen`.
-//! For production you should supply a real cert via the `QUIC_CERT_PEM` /
-//! `QUIC_KEY_PEM` environment variables (PEM files).
+//! For production supply real credentials via `QUIC_CERT_PEM` / `QUIC_KEY_PEM`.
 //!
 //! # Alt-Svc
-//! `main.rs` adds an `Alt-Svc` response header on the HTTP/1.1 + HTTP/2
-//! listener so that browsers and compatible clients can discover and upgrade
-//! to HTTP/3 automatically.
+//! `main.rs` injects an `Alt-Svc: h3=":<port>"` header on TCP responses so
+//! HTTP/3-capable clients can discover and upgrade automatically.
 //!
 //! # Why a separate listener?
-//! QUIC runs over UDP while HTTP/1.1 and HTTP/2 run over TCP.  They cannot
-//! share a single socket, so the QUIC endpoint binds its own UDP port
-//! (default: same port number as the TCP listener, because the OS keeps UDP
-//! and TCP port namespaces separate).
+//! QUIC runs over UDP; HTTP/1.1 + HTTP/2 run over TCP.  The OS keeps UDP and
+//! TCP port namespaces separate, so the QUIC endpoint can share the same port
+//! number without conflict.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use axum::Router;
-use h3::server::RequestStream;
+use axum::{body::Body, http, Router};
+use bytes::{Buf, Bytes, BytesMut};
 use h3_quinn::quinn;
+use http_body_util::BodyExt;
 use quinn::{crypto::rustls::QuicServerConfig, Endpoint, ServerConfig};
 use rustls::{
     pki_types::{CertificateDer, PrivatePkcs8KeyDer},
     ServerConfig as RustlsServerConfig,
 };
-use tracing::{debug, error, info, warn};
+use tower::ServiceExt;
+use tracing::{debug, info, warn};
+
+use crate::status::ServerMetrics;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Public entry point
+// Public entry points
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Bind a QUIC endpoint and accept HTTP/3 connections indefinitely.
-///
-/// Call this from `main` with `tokio::spawn` so it runs alongside the
-/// existing TCP listener.
-///
-/// ```ignore
-/// tokio::spawn(serve_quic(addr, app.clone()));
-/// ```
-pub async fn serve_quic(addr: SocketAddr, router: Router) -> Result<()> {
-    let (cert_chain, private_key) = load_or_generate_tls()?;
+/// Accept HTTP/3 connections and route them through the full Axum router.
+pub async fn serve_quic(
+    addr: SocketAddr,
+    router: Router,
+    metrics: Arc<ServerMetrics>,
+) -> Result<()> {
+    let endpoint = build_endpoint(addr)?;
+    info!("QUIC listener ready on {}", endpoint.local_addr()?);
+    accept_loop(endpoint, Arc::new(router), metrics).await
+}
 
-    let server_config = build_quinn_config(cert_chain, private_key)?;
-    let endpoint = Endpoint::server(server_config, addr)
-        .with_context(|| format!("Failed to bind QUIC endpoint on {addr}"))?;
+/// Accept HTTP/3 connections on the dedicated management port.
+pub async fn serve_quic_mgmt(
+    addr: SocketAddr,
+    mgmt_router: Router,
+    metrics: Arc<ServerMetrics>,
+) -> Result<()> {
+    let endpoint = build_endpoint(addr)?;
+    info!("QUIC management listener ready on {}", endpoint.local_addr()?);
+    accept_loop(endpoint, Arc::new(mgmt_router), metrics).await
+}
 
-    info!("QUIC/HTTP3 listener ready on {}", endpoint.local_addr()?);
+// ══════════════════════════════════════════════════════════════════════════════
+// Accept loop (shared by both entry points)
+// ══════════════════════════════════════════════════════════════════════════════
 
-    // Wrap the router in an `Arc` so it can be cheaply cloned into each
-    // connection handler task without re-allocating.
-    let router = Arc::new(router);
-
+async fn accept_loop(
+    endpoint: Endpoint,
+    router: Arc<Router>,
+    metrics: Arc<ServerMetrics>,
+) -> Result<()> {
     while let Some(incoming) = endpoint.accept().await {
         let router = router.clone();
+        let metrics = metrics.clone();
 
         tokio::spawn(async move {
             match incoming.await {
                 Ok(conn) => {
-                    if let Err(e) = handle_quic_connection(conn, router).await {
-                        // Connection-level errors are expected (client disconnects,
-                        // resets, idle timeouts) – log at debug, not error.
+                    metrics.quic_open();
+                    let result = handle_quic_connection(conn, router).await;
+                    metrics.quic_close();
+
+                    if let Err(e) = result {
                         debug!("QUIC connection closed: {e}");
                     }
                 }
@@ -84,50 +102,39 @@ pub async fn serve_quic(addr: SocketAddr, router: Router) -> Result<()> {
 // Per-connection handler
 // ══════════════════════════════════════════════════════════════════════════════
 
-async fn handle_quic_connection(
-    conn: quinn::Connection,
-    router: Arc<Router>,
-) -> Result<()> {
+async fn handle_quic_connection(conn: quinn::Connection, router: Arc<Router>) -> Result<()> {
     let remote = conn.remote_address();
     debug!("QUIC connection from {remote}");
 
-    let h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
-        .await
-        .context("HTTP/3 connection setup failed")?;
+    let mut h3_conn: h3::server::Connection<h3_quinn::Connection, Bytes> =
+        h3::server::Connection::new(h3_quinn::Connection::new(conn))
+            .await
+            .context("HTTP/3 connection setup failed")?;
 
-    handle_h3_connection(h3_conn, router, remote).await
-}
-
-async fn handle_h3_connection(
-    mut conn: h3::server::Connection<h3_quinn::Connection, bytes::Bytes>,
-    router: Arc<Router>,
-    remote: SocketAddr,
-) -> Result<()> {
     loop {
-        match conn.accept().await {
-            Ok(Some((req, stream))) => {
-                let router = router.clone();
+        match h3_conn.accept().await {
+            Ok(Some(resolver)) => {
+                let router = (*router).clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_h3_request(req, stream, router, remote).await {
+                    if let Err(e) = handle_h3_request(router, resolver).await {
                         debug!("HTTP/3 request error from {remote}: {e}");
                     }
                 });
             }
-            // Connection closed cleanly.
-            Ok(None) => break,
+            Ok(None) => break, // connection closed cleanly
             Err(e) => {
-                // Protocol errors on the connection itself — log and close.
-                use h3::error::ErrorLevel;
-                match e.get_error_level() {
-                    ErrorLevel::ConnectionError => {
-                        warn!("HTTP/3 connection error from {remote}: {e}");
-                        break;
-                    }
-                    ErrorLevel::StreamError => {
-                        // Stream error: skip this stream but keep the connection.
-                        debug!("HTTP/3 stream error from {remote}: {e}");
-                    }
+                // Distinguish graceful close from real errors by inspecting
+                // the debug representation (h3 error types are non-exhaustive).
+                let dbg = format!("{e:?}");
+                if dbg.contains("NO_ERROR")
+                    || dbg.contains("ApplicationClose: 0x0")
+                    || dbg.contains("ConnectionClosed")
+                {
+                    debug!("HTTP/3 connection closed gracefully from {remote}");
+                } else {
+                    warn!("HTTP/3 connection error from {remote}: {e}");
                 }
+                break;
             }
         }
     }
@@ -136,73 +143,88 @@ async fn handle_h3_connection(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Per-request adapter: h3 → Axum
+// Per-request adapter: h3 → Axum 0.7
 // ══════════════════════════════════════════════════════════════════════════════
 
 async fn handle_h3_request(
-    req: http::Request<()>,
-    mut stream: RequestStream<h3_quinn::BidiStream<bytes::Bytes>, bytes::Bytes>,
-    router: Arc<Router>,
-    remote: SocketAddr,
+    router: Router,
+    resolver: h3::server::RequestResolver<h3_quinn::Connection, Bytes>,
 ) -> Result<()> {
-    use axum::body::Body;
-    use bytes::Bytes;
-    use http_body_util::BodyExt;
-    use tower::ServiceExt;
+    // Resolve the request headers from the QUIC stream.
+    let (req_head, mut stream) = resolver
+        .resolve_request()
+        .await
+        .context("Failed to resolve HTTP/3 request headers")?;
 
-    // Collect the request body from the QUIC stream into an in-memory buffer.
-    // For chunk uploads this stays within the CDC max-size (4 MB), so OOM is
-    // not a concern here.  Very large bodies (file uploads) should still go
-    // through the TCP multipart endpoint.
-    let (parts, _) = req.into_parts();
-    let mut body_bytes: Vec<Bytes> = Vec::new();
-    while let Some(data) = stream.recv_data().await? {
-        body_bytes.push(data.into());
+    // Collect the request body.
+    let mut buf = BytesMut::new();
+    loop {
+        match stream.recv_data().await {
+            Ok(Some(mut chunk)) => {
+                buf.extend_from_slice(&chunk.copy_to_bytes(chunk.remaining()));
+            }
+            Ok(None) => break,
+            Err(e) => {
+                // Send 400 and close stream on body read error.
+                let mut err_resp = http::Response::new(());
+                *err_resp.status_mut() = http::StatusCode::BAD_REQUEST;
+                let _ = stream.send_response(err_resp).await;
+                let _ = stream.finish().await;
+                return Err(anyhow::anyhow!("Failed to read request body: {e}"));
+            }
+        }
     }
 
-    // Reconstruct the request with a proper `Body`.
-    let body = Body::from(body_bytes.concat());
-    let axum_req = http::Request::from_parts(parts, body);
+    // Build the Axum-compatible request.
+    let (parts, _) = req_head.into_parts();
+    let axum_req = http::Request::from_parts(parts, Body::from(buf.freeze()));
 
-    // Serve through the same Axum router as the TCP path.
-    let response = router
-        .clone()
+    // Route through Axum. The infallible error type means unwrap is safe here.
+    let axum_resp: http::Response<Body> = router
         .oneshot(axum_req)
         .await
         .context("Axum router error")?;
 
-    // Write the HTTP/3 response head.
-    let (resp_parts, resp_body) = response.into_parts();
+    // Send the response head over the H3 stream.
+    let (resp_parts, resp_body) = axum_resp.into_parts();
     stream
         .send_response(http::Response::from_parts(resp_parts, ()))
         .await
         .context("Failed to send HTTP/3 response head")?;
 
-    // Stream the response body.
-    let mut body = resp_body;
-    while let Some(frame) = body.frame().await {
-        if let Ok(frame) = frame {
-            if let Ok(data) = frame.into_data() {
-                stream.send_data(data).await.context("Failed to send HTTP/3 body chunk")?;
+    // Stream the response body frame by frame.
+    let mut pinned = std::pin::pin!(resp_body);
+    while let Some(frame_result) = <Body as BodyExt>::frame(&mut pinned).await {
+        let frame = frame_result.context("Response body error")?;
+        if let Ok(data) = frame.into_data() {
+            if !data.is_empty() {
+                stream
+                    .send_data(data)
+                    .await
+                    .context("Failed to send HTTP/3 body chunk")?;
             }
         }
     }
 
-    stream.finish().await.context("Failed to finish HTTP/3 stream")?;
+    stream
+        .finish()
+        .await
+        .context("Failed to finish HTTP/3 stream")?;
 
     Ok(())
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TLS helpers
+// Endpoint / TLS construction
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Load TLS credentials from environment variables, or generate a self-signed
-/// certificate if none are provided.
-///
-/// Environment variables:
-/// - `QUIC_CERT_PEM`: path to a PEM file containing the certificate chain.
-/// - `QUIC_KEY_PEM`:  path to a PEM file containing the private key.
+fn build_endpoint(addr: SocketAddr) -> Result<Endpoint> {
+    let (cert_chain, private_key) = load_or_generate_tls()?;
+    let server_config = build_quinn_config(cert_chain, private_key)?;
+    Endpoint::server(server_config, addr)
+        .with_context(|| format!("Failed to bind QUIC endpoint on {addr}"))
+}
+
 fn load_or_generate_tls() -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
     let cert_path = std::env::var("QUIC_CERT_PEM").ok();
     let key_path = std::env::var("QUIC_KEY_PEM").ok();
@@ -221,23 +243,20 @@ fn load_or_generate_tls() -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8K
 
             let key = rustls_pemfile::pkcs8_private_keys(&mut key_pem.as_slice())
                 .next()
-                .context("No PKCS8 private key found in QUIC_KEY_PEM")?
+                .context("No PKCS8 private key in QUIC_KEY_PEM")?
                 .context("Failed to parse QUIC private key")?;
 
             Ok((certs, key))
         }
         _ => {
-            info!("QUIC_CERT_PEM / QUIC_KEY_PEM not set – generating self-signed certificate");
+            info!("QUIC_CERT_PEM / QUIC_KEY_PEM not set — generating self-signed certificate");
             generate_self_signed()
         }
     }
 }
 
-/// Generate an ephemeral self-signed TLS certificate (ECDSA P-256, 90-day
-/// validity).  Suitable for development and private deployments.
 fn generate_self_signed() -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8KeyDer<'static>)> {
-    let hostname = std::env::var("QUIC_HOSTNAME")
-        .unwrap_or_else(|_| "localhost".to_string());
+    let hostname = std::env::var("QUIC_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
     let cert = rcgen::generate_simple_self_signed([hostname])
         .context("Failed to generate self-signed TLS certificate")?;
@@ -248,7 +267,6 @@ fn generate_self_signed() -> Result<(Vec<CertificateDer<'static>>, PrivatePkcs8K
     Ok((vec![cert_der], key_der))
 }
 
-/// Build a Quinn `ServerConfig` from a TLS certificate and private key.
 fn build_quinn_config(
     cert_chain: Vec<CertificateDer<'static>>,
     private_key: PrivatePkcs8KeyDer<'static>,
@@ -258,18 +276,16 @@ fn build_quinn_config(
         .with_single_cert(cert_chain, private_key.into())
         .context("Failed to build rustls ServerConfig")?;
 
-    // QUIC requires ALPN.  "h3" identifies HTTP/3.
+    // QUIC requires ALPN; "h3" identifies HTTP/3.
     rustls_config.alpn_protocols = vec![b"h3".to_vec()];
 
-    let quic_config =
-        QuicServerConfig::try_from(Arc::new(rustls_config)).context("Failed to build QuicServerConfig")?;
+    let quic_config = QuicServerConfig::try_from(Arc::new(rustls_config))
+        .context("Failed to build QuicServerConfig")?;
 
     let mut server_config = ServerConfig::with_crypto(Arc::new(quic_config));
 
-    // Transport parameters tuned for bulk chunk transfers:
-    //   - 1 MB initial stream receive window  (per stream)
-    //   - 8 MB initial connection receive window
-    //   - 30 s max idle timeout
+    // Transport parameters tuned for bulk chunk transfers + low-latency admin:
+    //   1 MB stream window  ·  8 MB connection window  ·  30 s idle timeout
     let mut transport = quinn::TransportConfig::default();
     transport
         .stream_receive_window(1_000_000u32.into())

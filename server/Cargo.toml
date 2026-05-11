@@ -9,7 +9,7 @@ authors = ["AnNa Team"]
 axum = { version = "0.7", features = ["http2", "ws", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["fs", "cors", "compression-br", "trace"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "compression-br", "trace", "set-header"] }
 
 # WebSocket for signaling
 tokio-tungstenite = "0.21"
@@ -46,12 +46,16 @@ async-compression = { version = "0.4", features = ["tokio", "brotli", "zstd"] }
 # h3-axum: bridges h3 connection acceptance to Axum's Router
 quinn = "0.11"
 h3 = "0.0.8"
-h3-quinn = "0.0.8"
-h3-axum = "0.2"
+h3-quinn = "0.0.10"
 
 # TLS (required by QUIC; rcgen generates a self-signed cert at startup)
 rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
 rcgen = "0.13"
+
+# HTTP body utilities (used in QUIC request adapter)
+http-body-util = "0.1"
+bytes = "1"
 
 # Logging and tracing
 tracing = "0.1"

@@ -229,6 +229,223 @@
   font-size: 0.9rem;
 }
 
+/* ── Tab navigation ──────────────────────────────────────────────────────── */
+
+.app-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  background: var(--social-bg);
+}
+
+.tab-btn {
+  padding: 0.75rem 1.75rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--text-h);
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Admin / status panel ────────────────────────────────────────────────── */
+
+.admin-panel {
+  padding: 0.5rem 0;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.admin-header h2 {
+  margin: 0;
+  color: var(--text-h);
+}
+
+.admin-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.badge-h3 {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.badge-online {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.badge-offline {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.badge-cdc {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.badge-legacy {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.admin-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.admin-updated {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0 0 1.5rem;
+}
+
+/* Summary stat cards */
+.admin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: var(--social-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow);
+}
+
+.stat-icon {
+  font-size: 1.75rem;
+  flex-shrink: 0;
+}
+
+.stat-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Data tables */
+.admin-section {
+  margin-bottom: 2rem;
+}
+
+.admin-section h3 {
+  margin: 0 0 0.75rem;
+  color: var(--text-h);
+}
+
+.admin-empty {
+  color: var(--text-secondary);
+  padding: 1rem 0;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin-table th {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  background: var(--social-bg);
+  border-bottom: 2px solid var(--border);
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.admin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tr:hover td {
+  background: var(--social-bg);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+.file-name-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hash-cell {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .admin-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .admin-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 @media (max-width: 768px) {
   .app-main {
     padding: 1rem;
