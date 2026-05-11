@@ -1,0 +1,61 @@
+[package]
+name = "anna-sync-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["AnNa Team"]
+
+[dependencies]
+# Web framework with HTTP/2 and HTTP/3 support
+axum = { version = "0.7", features = ["http2", "ws", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "compression-br", "trace"] }
+
+# HTTP/3 and QUIC
+h3 = "0.0.6"
+h3-quinn = "0.0.7"
+quinn = "0.11"
+
+# WebSocket for signaling
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Hashing and crypto
+sha2 = "0.10"
+blake3 = "1.5"
+hex = "0.4"
+
+# File handling
+tokio-util = { version = "0.7", features = ["io"] }
+
+# Compression
+brotli = "3.5"
+async-compression = { version = "0.4", features = ["tokio", "brotli", "zstd"] }
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "5.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
