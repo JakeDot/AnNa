@@ -28,7 +28,7 @@ jobs:
       name: testing
       url: https://a.nn.xn--3ca.at
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       - name: Deploy Testing
         run: echo "Deploying to Testing (a.nn.ã.at)"
 
@@ -39,7 +39,7 @@ jobs:
       name: staging
       url: https://e.nn.xn--3ca.at
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       - name: Deploy Staging
         run: echo "Deploying to Staging (e.nn.ã.at)"
 
@@ -50,6 +50,6 @@ jobs:
       name: production
       url: https://nn.xn--3ca.at
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       - name: Deploy Production
         run: echo "Deploying to Production (nn.ã.at)"
