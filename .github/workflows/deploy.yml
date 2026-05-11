@@ -1,0 +1,135 @@
+name: Deployment
+
+on:
+  push:
+    branches:
+      - testing
+      - staging
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - testing
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # Validate that workflow_dispatch branch matches selected environment
+  validate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch and environment match
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          BRANCH="${{ github.ref_name }}"
+
+          case "$ENV" in
+            testing)
+              EXPECTED_BRANCH="testing"
+              ;;
+            staging)
+              EXPECTED_BRANCH="staging"
+              ;;
+            production)
+              EXPECTED_BRANCH="main"
+              ;;
+          esac
+
+          if [ "$BRANCH" != "$EXPECTED_BRANCH" ]; then
+            echo "::error::Cannot deploy to $ENV from branch $BRANCH. Please dispatch from $EXPECTED_BRANCH branch."
+            exit 1
+          fi
+
+          echo "✓ Branch $BRANCH matches environment $ENV"
+
+  # Determine which environment to deploy to
+  deploy:
+    needs: [validate]
+    if: |
+      always() &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - environment: testing
+            branch: testing
+            url: https://a.nn.xn--3ca.at
+          - environment: staging
+            branch: staging
+            url: https://e.nn.xn--3ca.at
+          - environment: production
+            branch: main
+            url: https://nn.xn--3ca.at
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ matrix.url }}
+    steps:
+      - name: Check if deployment should run
+        id: should-deploy
+        run: |
+          SHOULD_DEPLOY=false
+
+          # For push events, check if current ref matches matrix branch
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if [ "${{ github.ref }}" = "refs/heads/${{ matrix.branch }}" ]; then
+              SHOULD_DEPLOY=true
+            fi
+          fi
+
+          # For workflow_dispatch, check if selected environment matches matrix environment
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.environment }}" = "${{ matrix.environment }}" ]; then
+              SHOULD_DEPLOY=true
+            fi
+          fi
+
+          echo "should-deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+
+          if [ "$SHOULD_DEPLOY" = "false" ]; then
+            echo "Skipping deployment - environment/branch mismatch"
+          else
+            echo "Proceeding with deployment to ${{ matrix.environment }}"
+          fi
+
+      - name: Checkout code
+        if: steps.should-deploy.outputs.should-deploy == 'true'
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Set up Docker Buildx
+        if: steps.should-deploy.outputs.should-deploy == 'true'
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db  # v3.7.1
+
+      - name: Build Docker image
+        if: steps.should-deploy.outputs.should-deploy == 'true'
+        run: |
+          docker build -t annasync:${{ matrix.environment }}-${{ github.sha }} .
+          echo "✓ Built Docker image: annasync:${{ matrix.environment }}-${{ github.sha }}"
+
+      - name: Deploy to ${{ matrix.environment }}
+        if: steps.should-deploy.outputs.should-deploy == 'true'
+        run: |
+          echo "Deploying to ${{ matrix.environment }} (${{ matrix.url }})"
+          echo "Image: annasync:${{ matrix.environment }}-${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+
+          # TODO: Add actual deployment commands here:
+          # - Push image to container registry
+          # - Deploy to hosting platform (e.g., SSH to server, kubectl apply, docker-compose pull)
+          # - Update environment with new image tag
+
+          echo "✓ Deployment to ${{ matrix.environment }} complete"
