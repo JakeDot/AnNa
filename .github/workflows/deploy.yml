@@ -7,13 +7,22 @@ on:
       - staging
       - main
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - testing
+          - staging
+          - production
 
 permissions:
   contents: read
 
 jobs:
   deploy-testing:
-    if: github.ref == 'refs/heads/testing'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/testing') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'testing' && github.ref == 'refs/heads/testing')
     runs-on: ubuntu-latest
     environment:
       name: testing
@@ -24,7 +33,7 @@ jobs:
         run: echo "Deploying to Testing (a.nn.ã.at)"
 
   deploy-staging:
-    if: github.ref == 'refs/heads/staging'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && github.ref == 'refs/heads/staging')
     runs-on: ubuntu-latest
     environment:
       name: staging
@@ -35,7 +44,7 @@ jobs:
         run: echo "Deploying to Staging (e.nn.ã.at)"
 
   deploy-production:
-    if: github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     environment:
       name: production
