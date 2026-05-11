@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testing
-      url: https://a.nn.ã.at
+      url: https://a.nn.xn--3ca.at
     steps:
       - uses: actions/checkout@v4
       - name: Deploy Testing
@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: staging
-      url: https://e.nn.ã.at
+      url: https://e.nn.xn--3ca.at
     steps:
       - uses: actions/checkout@v4
       - name: Deploy Staging
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://nn.ã.at
+      url: https://nn.xn--3ca.at
     steps:
       - uses: actions/checkout@v4
       - name: Deploy Production
