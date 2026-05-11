@@ -1,4 +1,4 @@
-# ãnn@sync
+# ÃnN@sync
 
 A high-performance peer-to-peer file synchronization platform built with Rust and React.
 
@@ -41,7 +41,7 @@ A high-performance peer-to-peer file synchronization platform built with Rust an
 docker-compose up --build
 ```
 
-The application will be available at `http://localhost:3000`
+The application will be available at `http://localhost:3000` (dev) or [nn.ã.at]
 
 ### Running Locally
 
@@ -92,17 +92,6 @@ Client:
 - `VITE_WS_URL` - WebSocket URL (default: `ws://localhost:3000`)
 
 ## Deployment
-
-### Domain Setup for sync.ã.at
-
-1. Register domain with IDN support (.at registry via nic.at)
-2. Configure DNS with Cloudflare:
-   ```
-   A record: sync.xn--nn-eka.at -> [Your Server IP]
-   AAAA record: sync.xn--nn-eka.at -> [Your IPv6 if available]
-   ```
-3. Enable Cloudflare proxy for DDoS protection
-4. SSL/TLS: Full (strict) mode with Origin Certificate
 
 ### Production Deployment
 
