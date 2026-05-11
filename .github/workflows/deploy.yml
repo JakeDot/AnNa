@@ -1,0 +1,46 @@
+name: Deployment
+
+on:
+  push:
+    branches:
+      - testing
+      - staging
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-testing:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/testing'
+    runs-on: ubuntu-latest
+    environment:
+      name: testing
+      url: https://a.nn.ã.at
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Testing
+        run: echo "Deploying to Testing (a.nn.ã.at)"
+
+  deploy-staging:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://e.nn.ã.at
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Staging
+        run: echo "Deploying to Staging (e.nn.ã.at)"
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://nn.ã.at
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Production
+        run: echo "Deploying to Production (nn.ã.at)"
