@@ -83,11 +83,27 @@ pub async fn delete_label(
 }
 
 /// POST /api/files/:hash/labels
+/// Applies one of the authenticated user's labels to a file.
 pub async fn add_file_label(
     State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
     Path(hash): Path<String>,
     Json(body): Json<AddFileLabelRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Verify the label belongs to the calling user before applying it
+    let labels = state.db.list_labels_for_user(&user.id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("Failed to verify label ownership: {e}") }),
+        )
+    })?;
+    let owned = labels.iter().any(|l| l.id == body.label_id);
+    if !owned {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse { error: "Label not found or does not belong to you".to_string() }),
+        ));
+    }
     state.db.add_file_label(&hash, &body.label_id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -98,10 +114,26 @@ pub async fn add_file_label(
 }
 
 /// DELETE /api/files/:hash/labels/:label_id
+/// Removes a label from a file; only the label owner may do so.
 pub async fn remove_file_label(
     State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
     Path((hash, label_id)): Path<(String, String)>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Verify ownership before removal
+    let labels = state.db.list_labels_for_user(&user.id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("Failed to verify label ownership: {e}") }),
+        )
+    })?;
+    let owned = labels.iter().any(|l| l.id == label_id);
+    if !owned {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse { error: "Label not found or does not belong to you".to_string() }),
+        ));
+    }
     state.db.remove_file_label(&hash, &label_id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,

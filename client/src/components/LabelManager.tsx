@@ -66,7 +66,7 @@ export const LabelManager: React.FC<LabelManagerProps> = ({ currentUser }) => {
             required
           />
           <label className="color-label">
-            Colour:&nbsp;
+            Color:&nbsp;
             <input
               type="color"
               value={newColor}
