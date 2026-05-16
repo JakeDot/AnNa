@@ -3,7 +3,7 @@ use axum::{
     extract::{DefaultBodyLimit, Multipart, Path, State, WebSocketUpgrade},
     http::{header, StatusCode},
     response::{IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use dashmap::DashMap;
@@ -19,15 +19,19 @@ use tower_http::{compression::CompressionLayer, cors::CorsLayer, services::Serve
 use tracing::{info, warn};
 use uuid::Uuid;
 
+mod auth;
 mod cdc;
 mod database;
+mod folders;
+mod groups;
+mod labels;
 mod quic;
 mod signaling;
 mod status;
 mod storage;
 
 use cdc::compute_chunks;
-use database::Database;
+use database::{Database, FileShare};
 use signaling::handle_websocket;
 use status::{status_handler, ServerMetrics};
 use storage::{ChunkTracker, FileStorage};
@@ -98,6 +102,12 @@ impl IntoResponse for ErrorResponse {
     }
 }
 
+#[derive(Deserialize)]
+struct SetShareRequest {
+    visibility: String,
+    group_id: Option<String>,
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Entry point
 // ══════════════════════════════════════════════════════════════════════════════
@@ -151,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Alt-Svc header value is always valid ASCII");
 
     let app = Router::new()
+        // ── existing file / chunk / peer routes ───────────────────────────
         .route("/api/files/check/{hash}", get(check_file))
         .route("/api/files", get(list_files))
         .route("/api/upload", post(upload_file))
@@ -160,6 +171,27 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/peers", get(list_peers))
         .route("/api/status", get(status_handler))
         .route("/ws", get(websocket_handler))
+        // ── auth ──────────────────────────────────────────────────────────
+        .route("/api/auth/github", get(auth::github_login))
+        .route("/api/auth/github/callback", get(auth::github_callback))
+        .route("/api/auth/me", get(auth::get_me))
+        .route("/api/auth/logout", post(auth::logout))
+        // ── groups ────────────────────────────────────────────────────────
+        .route("/api/groups", get(groups::list_groups).post(groups::create_group))
+        .route("/api/groups/{id}", get(groups::get_group).delete(groups::delete_group))
+        .route("/api/groups/{id}/members", post(groups::add_member))
+        .route("/api/groups/{id}/members/{user_id}", delete(groups::remove_member))
+        // ── labels ────────────────────────────────────────────────────────
+        .route("/api/labels", get(labels::list_labels).post(labels::create_label))
+        .route("/api/labels/{id}", delete(labels::delete_label))
+        .route("/api/files/{hash}/labels", get(labels::get_file_labels).post(labels::add_file_label))
+        .route("/api/files/{hash}/labels/{label_id}", delete(labels::remove_file_label))
+        // ── folders ───────────────────────────────────────────────────────
+        .route("/api/folders", get(folders::list_folders).post(folders::create_folder))
+        .route("/api/folders/{id}", get(folders::get_folder_contents))
+        .route("/api/folders/{id}/files", post(folders::add_file_to_folder))
+        // ── sharing ───────────────────────────────────────────────────────
+        .route("/api/files/{hash}/share", post(set_file_share))
         .nest_service("/", ServeDir::new(&public_dir))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE))
         .layer(CompressionLayer::new())
@@ -576,5 +608,34 @@ async fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, ErrorResponse> {
         error: format!("Decompression failed: {e}"),
     })?;
     Ok(out)
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Sharing handler
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// POST /api/files/:hash/share
+/// Set the visibility of a file (public / private / group) and optionally
+/// restrict it to a specific group.
+async fn set_file_share(
+    State(state): State<AppState>,
+    auth::OptionalUser(user): auth::OptionalUser,
+    Path(hash): Path<String>,
+    Json(body): Json<SetShareRequest>,
+) -> Result<StatusCode, ErrorResponse> {
+    let share = FileShare {
+        file_hash: hash,
+        owner_id: user.map(|u| u.id),
+        visibility: body.visibility,
+        group_id: body.group_id,
+        created_at: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+    };
+    state.db.set_file_share(&share).await.map_err(|e| ErrorResponse {
+        error: format!("Failed to set share: {e}"),
+    })?;
+    Ok(StatusCode::OK)
 }
 
