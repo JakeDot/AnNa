@@ -30,10 +30,10 @@ export interface ServerStatus {
   peers: PeerStats[]
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
+import { getServerUrlSync } from '../lib/serverConfig'
 
 export async function getServerStatus(): Promise<ServerStatus> {
-  const resp = await fetch(`${API_BASE}/api/status`)
+  const resp = await fetch(`${getServerUrlSync()}/api/status`)
   if (!resp.ok) throw new Error(`Status fetch failed: ${resp.status}`)
   return resp.json() as Promise<ServerStatus>
 }

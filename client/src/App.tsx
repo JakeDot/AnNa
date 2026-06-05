@@ -4,6 +4,7 @@ import { FileUploader } from './components/FileUploader'
 import { FileList } from './components/FileList'
 import { PeerStatus } from './components/PeerStatus'
 import { AdminPanel } from './components/AdminPanel'
+import { ServerSettings } from './components/ServerSettings'
 import { useWebSocket } from './hooks/useWebSocket'
 import { uploadFile, listFiles } from './api/fileApi'
 
@@ -23,6 +24,7 @@ function App() {
   const [files, setFiles] = useState<FileMetadata[]>([])
   const [uploading, setUploading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('files')
+  const [showSettings, setShowSettings] = useState(false)
   const { connected, peers, sendMessage } = useWebSocket()
 
   const fetchFiles = useCallback(async () => {
@@ -43,16 +45,9 @@ function App() {
     try {
       const result = await uploadFile(file)
       console.log('Upload result:', result)
-
-      // Refresh file list
       await fetchFiles()
-
-      // Announce new file to peers
       if (connected) {
-        sendMessage({
-          type: 'announce',
-          files: [result.hash]
-        })
+        sendMessage({ type: 'announce', files: [result.hash] })
       }
     } catch (error) {
       console.error('Upload failed:', error)
@@ -62,12 +57,25 @@ function App() {
     }
   }
 
+  const handleServerSave = () => {
+    fetchFiles()
+  }
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>ãnn@sync</h1>
         <p className="tagline">P2P File Sync Platform</p>
-        <PeerStatus connected={connected} peerCount={peers.length} />
+        <div className="header-right">
+          <PeerStatus connected={connected} peerCount={peers.length} />
+          <button
+            className="settings-btn"
+            onClick={() => setShowSettings(true)}
+            title="Server settings"
+          >
+            ⚙
+          </button>
+        </div>
       </header>
 
       <nav className="app-tabs">
@@ -106,6 +114,13 @@ function App() {
       <footer className="app-footer">
         <p>Built with Rust + React + QUIC</p>
       </footer>
+
+      {showSettings && (
+        <ServerSettings
+          onClose={() => setShowSettings(false)}
+          onSave={handleServerSave}
+        />
+      )}
     </div>
   )
 }

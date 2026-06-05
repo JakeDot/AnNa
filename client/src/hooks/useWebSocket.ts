@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws'
+import { getServerUrlSync, getWsUrl } from '../lib/serverConfig'
 
 interface Peer {
   id: string
@@ -23,7 +22,7 @@ export function useWebSocket() {
 
   const connect = useCallback(() => {
     try {
-      const socket = new WebSocket(WS_URL)
+      const socket = new WebSocket(getWsUrl(getServerUrlSync()))
       socketRef.current = socket
 
       socket.onopen = () => {

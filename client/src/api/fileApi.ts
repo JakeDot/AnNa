@@ -1,6 +1,9 @@
 import axios from 'axios'
+import { getServerUrlSync } from '../lib/serverConfig'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+function apiBase(): string {
+  return getServerUrlSync()
+}
 
 export interface UploadResponse {
   status: string
@@ -40,7 +43,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const response = await axios.post<UploadResponse>(`${API_BASE}/api/upload`, formData, {
+  const response = await axios.post<UploadResponse>(`${apiBase()}/api/upload`, formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
@@ -50,24 +53,24 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
 }
 
 export async function listFiles(): Promise<FileMetadata[]> {
-  const response = await axios.get<FileMetadata[]>(`${API_BASE}/api/files`)
+  const response = await axios.get<FileMetadata[]>(`${apiBase()}/api/files`)
   return response.data
 }
 
 export async function checkFile(hash: string): Promise<CheckResponse> {
-  const response = await axios.get<CheckResponse>(`${API_BASE}/api/files/check/${hash}`)
+  const response = await axios.get<CheckResponse>(`${apiBase()}/api/files/check/${hash}`)
   return response.data
 }
 
 export async function downloadFile(hash: string): Promise<Blob> {
-  const response = await axios.get(`${API_BASE}/api/download/${hash}`, {
+  const response = await axios.get(`${apiBase()}/api/download/${hash}`, {
     responseType: 'blob',
   })
   return response.data
 }
 
 export function getDownloadUrl(hash: string): string {
-  return `${API_BASE}/api/download/${hash}`
+  return `${apiBase()}/api/download/${hash}`
 }
 
 /**
@@ -78,7 +81,7 @@ export function getDownloadUrl(hash: string): string {
  * to get rarest-first peer assignments from the server.
  */
 export async function getChunks(hash: string): Promise<ChunkBoundary[]> {
-  const response = await axios.get<ChunkBoundary[]>(`${API_BASE}/api/chunks/${hash}`)
+  const response = await axios.get<ChunkBoundary[]>(`${apiBase()}/api/chunks/${hash}`)
   return response.data
 }
 
@@ -93,7 +96,7 @@ export async function getChunks(hash: string): Promise<ChunkBoundary[]> {
  * hash; callers should verify it before using the data.
  */
 export async function fetchChunk(hash: string, chunkId: number): Promise<ArrayBuffer> {
-  const response = await axios.get(`${API_BASE}/api/chunk/${hash}/${chunkId}`, {
+  const response = await axios.get(`${apiBase()}/api/chunk/${hash}/${chunkId}`, {
     responseType: 'arraybuffer',
   })
   return response.data

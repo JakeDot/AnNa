@@ -14,6 +14,11 @@ uploads/
 /client/.vite/
 *.log
 
+# Tauri
+/client/src-tauri/target/
+/client/src-tauri/gen/android/
+/client/src-tauri/gen/apple/
+
 # Environment
 .env
 .env.local
