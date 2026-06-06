@@ -14,6 +14,12 @@ identity and drop this note.
 - If no branch name has been provided for a task, **ask the user for
   one before creating the branch**. Do not invent a name.
 
+## Pull requests
+
+- **Never create PRs as drafts.** Draft PRs prevent GitHub Copilot from
+  performing automatic code review, which is a key part of the workflow.
+- Only create a PR when the user explicitly asks for one.
+
 ## Commit style
 
 ### Focused commits
