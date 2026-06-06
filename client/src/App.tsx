@@ -4,8 +4,13 @@ import { FileUploader } from './components/FileUploader'
 import { FileList } from './components/FileList'
 import { PeerStatus } from './components/PeerStatus'
 import { AdminPanel } from './components/AdminPanel'
+import { LoginButton } from './components/LoginButton'
+import { GroupsPanel } from './components/GroupsPanel'
+import { LabelManager } from './components/LabelManager'
 import { useWebSocket } from './hooks/useWebSocket'
 import { uploadFile, listFiles } from './api/fileApi'
+import { getCurrentUser, setToken, getToken } from './api/authApi'
+import type { User } from './api/authApi'
 
 export interface FileMetadata {
   hash: string
@@ -17,13 +22,31 @@ export interface FileMetadata {
   compressed: boolean
 }
 
-type Tab = 'files' | 'admin'
+type Tab = 'files' | 'groups' | 'labels' | 'admin'
 
 function App() {
   const [files, setFiles] = useState<FileMetadata[]>([])
   const [uploading, setUploading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('files')
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const { connected, peers, sendMessage } = useWebSocket()
+
+  // Handle OAuth callback: extract token from ?token=... query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (token) {
+      setToken(token)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  // Restore logged-in user from stored token
+  useEffect(() => {
+    if (getToken()) {
+      getCurrentUser().then(user => setCurrentUser(user))
+    }
+  }, [])
 
   const fetchFiles = useCallback(async () => {
     try {
@@ -44,14 +67,12 @@ function App() {
       const result = await uploadFile(file)
       console.log('Upload result:', result)
 
-      // Refresh file list
       await fetchFiles()
 
-      // Announce new file to peers
       if (connected) {
         sendMessage({
           type: 'announce',
-          files: [result.hash]
+          files: [result.hash],
         })
       }
     } catch (error) {
@@ -62,11 +83,20 @@ function App() {
     }
   }
 
+  const handleLogout = () => {
+    setCurrentUser(null)
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ãnn@sync</h1>
-        <p className="tagline">P2P File Sync Platform</p>
+        <div className="header-top">
+          <div>
+            <h1>ãnn@sync</h1>
+            <p className="tagline">P2P File Sync Platform</p>
+          </div>
+          <LoginButton user={currentUser} onLogout={handleLogout} />
+        </div>
         <PeerStatus connected={connected} peerCount={peers.length} />
       </header>
 
@@ -76,6 +106,18 @@ function App() {
           onClick={() => setActiveTab('files')}
         >
           📁 Files
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'groups' ? 'active' : ''}`}
+          onClick={() => setActiveTab('groups')}
+        >
+          👥 Groups
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'labels' ? 'active' : ''}`}
+          onClick={() => setActiveTab('labels')}
+        >
+          🏷️ Labels
         </button>
         <button
           className={`tab-btn ${activeTab === 'admin' ? 'active' : ''}`}
@@ -99,6 +141,10 @@ function App() {
             </section>
           </>
         )}
+
+        {activeTab === 'groups' && <GroupsPanel currentUser={currentUser} />}
+
+        {activeTab === 'labels' && <LabelManager currentUser={currentUser} />}
 
         {activeTab === 'admin' && <AdminPanel />}
       </main>

@@ -467,3 +467,167 @@
   }
 }
 
+/* ── Header layout ──────────────────────────────────────────────────────────── */
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Auth / user info ───────────────────────────────────────────────────────── */
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 0.4rem 0.8rem;
+  border-radius: 24px;
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* ── Groups panel ───────────────────────────────────────────────────────────── */
+.groups-panel,
+.label-manager {
+  padding: 1.5rem;
+}
+
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 480px;
+  margin-bottom: 2rem;
+  padding: 1.25rem;
+  background: var(--card-bg, #1e1e2e);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.create-form h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.text-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg, #13131f);
+  color: inherit;
+  font-size: 0.95rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.groups-list,
+.labels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 640px;
+}
+
+.group-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--card-bg, #1e1e2e);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.group-item:hover {
+  border-color: #667eea;
+}
+
+.group-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-desc {
+  opacity: 0.65;
+  font-size: 0.9rem;
+}
+
+.group-detail {
+  margin-top: 2rem;
+  max-width: 640px;
+}
+
+/* ── Label items ────────────────────────────────────────────────────────────── */
+.label-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.label-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* ── Upload folder button layout ────────────────────────────────────────────── */
+.upload-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ── Colour picker ──────────────────────────────────────────────────────────── */
+.color-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.color-input {
+  width: 40px;
+  height: 28px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+}
+
+/* ── Danger button ──────────────────────────────────────────────────────────── */
+.button-danger {
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+.button-danger:hover {
+  background: #dc2626 !important;
+}
+
+
