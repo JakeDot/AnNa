@@ -23,7 +23,7 @@ export const LabelManager: React.FC<LabelManagerProps> = ({ currentUser }) => {
   }, [])
 
   useEffect(() => {
-    fetchLabels()
+    void fetchLabels()
   }, [fetchLabels])
 
   const handleCreate = async (e: React.FormEvent) => {

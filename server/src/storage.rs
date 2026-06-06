@@ -216,10 +216,7 @@ impl ChunkTracker {
         bitfield: &[u8],
         chunk_count: u32,
     ) {
-        let file_chunks = self
-            .peer_chunks
-            .entry(file_hash.to_string())
-            .or_default();
+        let file_chunks = self.peer_chunks.entry(file_hash.to_string()).or_default();
 
         let peer_str = peer_id.to_string();
 
@@ -312,13 +309,11 @@ impl ChunkTracker {
         // Sort: chunks with the fewest peers first (rarest first).
         // Chunks with 0 peers go to the end so we do not request the
         // unobtainable before the rare.
-        scored.sort_by(|a, b| {
-            match (a.1, b.1) {
-                (0, 0) => a.0.cmp(&b.0),
-                (0, _) => std::cmp::Ordering::Greater,
-                (_, 0) => std::cmp::Ordering::Less,
-                _ => a.1.cmp(&b.1),
-            }
+        scored.sort_by(|a, b| match (a.1, b.1) {
+            (0, 0) => a.0.cmp(&b.0),
+            (0, _) => std::cmp::Ordering::Greater,
+            (_, 0) => std::cmp::Ordering::Less,
+            _ => a.1.cmp(&b.1),
         });
 
         scored
@@ -362,4 +357,3 @@ impl ChunkTracker {
             .unwrap_or(ChunkState::Missing)
     }
 }
-

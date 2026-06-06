@@ -23,8 +23,8 @@ export const AdminPanel: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    fetchStatus()
-    const id = setInterval(fetchStatus, POLL_INTERVAL_MS)
+    void fetchStatus()
+    const id = setInterval(() => void fetchStatus(), POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [fetchStatus])
 

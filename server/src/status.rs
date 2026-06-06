@@ -137,27 +137,26 @@ pub async fn status_handler(State(state): State<AppState>) -> Json<ServerStatus>
         .collect();
 
     // Pull file list from DB; on error return zeros rather than a 500.
-    let (file_count, total_bytes, total_chunk_count, files) =
-        match state.db.list_files().await {
-            Ok(all) => {
-                let total_bytes = all.iter().map(|f| f.size).sum();
-                let total_chunks = all.iter().map(|f| f.chunk_count as u64).sum();
-                let file_count = all.len();
-                let stats: Vec<FileStats> = all
-                    .into_iter()
-                    .map(|f| FileStats {
-                        hash: f.hash,
-                        name: f.name,
-                        size: f.size,
-                        chunk_count: f.chunk_count,
-                        uploaded_at: f.uploaded_at,
-                        compressed: f.compressed,
-                    })
-                    .collect();
-                (file_count, total_bytes, total_chunks, stats)
-            }
-            Err(_) => (0, 0, 0, Vec::new()),
-        };
+    let (file_count, total_bytes, total_chunk_count, files) = match state.db.list_files().await {
+        Ok(all) => {
+            let total_bytes = all.iter().map(|f| f.size).sum();
+            let total_chunks = all.iter().map(|f| f.chunk_count as u64).sum();
+            let file_count = all.len();
+            let stats: Vec<FileStats> = all
+                .into_iter()
+                .map(|f| FileStats {
+                    hash: f.hash,
+                    name: f.name,
+                    size: f.size,
+                    chunk_count: f.chunk_count,
+                    uploaded_at: f.uploaded_at,
+                    compressed: f.compressed,
+                })
+                .collect();
+            (file_count, total_bytes, total_chunks, stats)
+        }
+        Err(_) => (0, 0, 0, Vec::new()),
+    };
 
     Json(ServerStatus {
         version: env!("CARGO_PKG_VERSION"),
@@ -170,10 +169,7 @@ pub async fn status_handler(State(state): State<AppState>) -> Json<ServerStatus>
             .metrics
             .active_quic_connections
             .load(Ordering::Relaxed),
-        total_quic_connections: state
-            .metrics
-            .total_quic_connections
-            .load(Ordering::Relaxed),
+        total_quic_connections: state.metrics.total_quic_connections.load(Ordering::Relaxed),
         quic_enabled: true, // QUIC listeners are always started alongside the server
         files,
         peers,

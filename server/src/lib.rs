@@ -140,12 +140,10 @@ pub fn build_router(
         .with_state(state);
 
     if let Some(v) = alt_svc {
-        router = router.layer(
-            tower_http::set_header::SetResponseHeaderLayer::overriding(
-                header::HeaderName::from_static("alt-svc"),
-                v,
-            ),
-        );
+        router = router.layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("alt-svc"),
+            v,
+        ));
     }
 
     router
@@ -246,9 +244,17 @@ async fn check_file(
     if exists {
         let chunks = state.chunk_tracker.get_available_chunks(&hash);
         let bitfield = state.chunk_tracker.get_server_bitfield(&hash);
-        Ok(Json(CheckResponse { exists: true, chunks: Some(chunks), bitfield: Some(bitfield) }))
+        Ok(Json(CheckResponse {
+            exists: true,
+            chunks: Some(chunks),
+            bitfield: Some(bitfield),
+        }))
     } else {
-        Ok(Json(CheckResponse { exists: false, chunks: None, bitfield: None }))
+        Ok(Json(CheckResponse {
+            exists: false,
+            chunks: None,
+            bitfield: None,
+        }))
     }
 }
 
@@ -257,7 +263,9 @@ async fn list_files(
 ) -> Result<Json<Vec<FileMetadata>>, ErrorResponse> {
     state.db.list_files().await.map(Json).map_err(|e| {
         warn!("Failed to list files: {}", e);
-        ErrorResponse { error: "Failed to list files".to_string() }
+        ErrorResponse {
+            error: "Failed to list files".to_string(),
+        }
     })
 }
 
@@ -284,47 +292,48 @@ async fn upload_file(
     let mut hasher = blake3::Hasher::new();
     let mut file_size: u64 = 0;
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| ErrorResponse { error: format!("Multipart error: {e}") })?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|e| ErrorResponse {
+        error: format!("Multipart error: {e}"),
+    })? {
         if field.name().unwrap_or("") != "file" {
             continue;
         }
         filename = field.file_name().map(str::to_string);
-        mime_type = field.content_type().unwrap_or("application/octet-stream").to_string();
+        mime_type = field
+            .content_type()
+            .unwrap_or("application/octet-stream")
+            .to_string();
 
         let temp_path =
             std::env::temp_dir().join(format!("anna-sync-upload-{}.tmp", Uuid::new_v4()));
-        let mut temp_file = File::create(&temp_path)
-            .await
-            .map_err(|e| ErrorResponse { error: format!("Failed to create temp file: {e}") })?;
+        let mut temp_file = File::create(&temp_path).await.map_err(|e| ErrorResponse {
+            error: format!("Failed to create temp file: {e}"),
+        })?;
 
         let mut stream = field;
-        while let Some(chunk) = stream
-            .chunk()
-            .await
-            .map_err(|e| ErrorResponse { error: format!("Failed to read upload chunk: {e}") })?
-        {
+        while let Some(chunk) = stream.chunk().await.map_err(|e| ErrorResponse {
+            error: format!("Failed to read upload chunk: {e}"),
+        })? {
             hasher.update(&chunk);
             file_size += chunk.len() as u64;
             temp_file
                 .write_all(&chunk)
                 .await
-                .map_err(|e| ErrorResponse { error: format!("Failed to write temp file: {e}") })?;
+                .map_err(|e| ErrorResponse {
+                    error: format!("Failed to write temp file: {e}"),
+                })?;
         }
-        temp_file
-            .sync_all()
-            .await
-            .map_err(|e| ErrorResponse { error: format!("Failed to sync temp file: {e}") })?;
+        temp_file.sync_all().await.map_err(|e| ErrorResponse {
+            error: format!("Failed to sync temp file: {e}"),
+        })?;
         drop(temp_file);
         temp_file_path = Some(temp_path);
         break;
     }
 
-    let temp_path =
-        temp_file_path.ok_or_else(|| ErrorResponse { error: "No file field in upload".to_string() })?;
+    let temp_path = temp_file_path.ok_or_else(|| ErrorResponse {
+        error: "No file field in upload".to_string(),
+    })?;
     let guard = TempFileGuard::new(temp_path.clone());
     let filename = filename.unwrap_or_else(|| "unnamed".to_string());
     let hash = hasher.finalize().to_hex().to_string();
@@ -334,19 +343,28 @@ async fn upload_file(
         let _ = tokio::fs::remove_file(&temp_path).await;
         info!("Deduplicated upload: {}", hash);
         let chunk_count = state.chunk_tracker.get_available_chunks(&hash).len() as u32;
-        return Ok(Json(UploadResponse { status: "exists".to_string(), hash, size: file_size, chunk_count }));
+        return Ok(Json(UploadResponse {
+            status: "exists".to_string(),
+            hash,
+            size: file_size,
+            chunk_count,
+        }));
     }
 
     let boundaries = compute_chunks(&temp_path)
         .await
-        .map_err(|e| ErrorResponse { error: format!("CDC failed: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("CDC failed: {e}"),
+        })?;
     let chunk_count = boundaries.len() as u32;
 
     state
         .storage
         .save_file_from_path(&hash, &temp_path)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to store file: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Failed to store file: {e}"),
+        })?;
 
     let metadata = FileMetadata {
         hash: hash.clone(),
@@ -365,66 +383,88 @@ async fn upload_file(
         .db
         .save_file(&metadata)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to save metadata: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Failed to save metadata: {e}"),
+        })?;
     state
         .db
         .save_chunks(&hash, &boundaries)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to save chunk boundaries: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Failed to save chunk boundaries: {e}"),
+        })?;
 
     guard.disarm(); // Successfully stored, disarm cleanup
     for b in &boundaries {
         state.chunk_tracker.add_chunk(&hash, b.chunk_id);
     }
 
-    info!("Upload complete: {} ({} bytes, {} CDC chunks)", hash, file_size, chunk_count);
+    info!(
+        "Upload complete: {} ({} bytes, {} CDC chunks)",
+        hash, file_size, chunk_count
+    );
 
-    Ok(Json(UploadResponse { status: "success".to_string(), hash, size: file_size, chunk_count }))
+    Ok(Json(UploadResponse {
+        status: "success".to_string(),
+        hash,
+        size: file_size,
+        chunk_count,
+    }))
 }
 
 async fn download_file(
     State(state): State<AppState>,
     Path(hash): Path<String>,
 ) -> Result<Response, ErrorResponse> {
-    let metadata = state
-        .db
-        .get_file(&hash)
-        .await
-        .map_err(|_| ErrorResponse { error: "File not found".to_string() })?;
+    let metadata = state.db.get_file(&hash).await.map_err(|_| ErrorResponse {
+        error: "File not found".to_string(),
+    })?;
 
     if metadata.compressed {
         let data = state
             .storage
             .read_file(&hash)
             .await
-            .map_err(|e| ErrorResponse { error: format!("Failed to read file: {e}") })?;
+            .map_err(|e| ErrorResponse {
+                error: format!("Failed to read file: {e}"),
+            })?;
         let final_data = decompress_brotli(&data).await?;
-        return Ok((StatusCode::OK, [(header::CONTENT_TYPE, metadata.mime_type)], final_data)
+        return Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, metadata.mime_type)],
+            final_data,
+        )
             .into_response());
     }
 
     let file_path = state.storage.get_file_path(&hash);
-    let file = File::open(&file_path)
-        .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to open file: {e}") })?;
+    let file = File::open(&file_path).await.map_err(|e| ErrorResponse {
+        error: format!("Failed to open file: {e}"),
+    })?;
     let body = Body::from_stream(ReaderStream::new(file));
 
-    Ok((StatusCode::OK, [(header::CONTENT_TYPE, metadata.mime_type)], body).into_response())
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, metadata.mime_type)],
+        body,
+    )
+        .into_response())
 }
 
 async fn get_chunk(
     State(state): State<AppState>,
     Path((hash, chunk_id)): Path<(String, u32)>,
 ) -> Result<Response, ErrorResponse> {
-    let metadata = state
-        .db
-        .get_file(&hash)
-        .await
-        .map_err(|_| ErrorResponse { error: "File not found".to_string() })?;
+    let metadata = state.db.get_file(&hash).await.map_err(|_| ErrorResponse {
+        error: "File not found".to_string(),
+    })?;
 
     if chunk_id >= metadata.chunk_count {
         return Err(ErrorResponse {
-            error: format!("Chunk {} out of range (file has {} chunks)", chunk_id, metadata.chunk_count),
+            error: format!(
+                "Chunk {} out of range (file has {} chunks)",
+                chunk_id, metadata.chunk_count
+            ),
         });
     }
 
@@ -436,21 +476,30 @@ async fn get_chunk(
         .db
         .get_chunk_boundary(&hash, chunk_id)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Chunk boundary not found: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Chunk boundary not found: {e}"),
+        })?;
 
     let data = state
         .storage
         .read_chunk(&hash, boundary.offset, boundary.length)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to read chunk: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Failed to read chunk: {e}"),
+        })?;
 
     let actual_hash = blake3::hash(&data).to_hex().to_string();
     if actual_hash != boundary.hash {
-        return Err(ErrorResponse { error: format!("Chunk {} integrity check failed", chunk_id) });
+        return Err(ErrorResponse {
+            error: format!("Chunk {} integrity check failed", chunk_id),
+        });
     }
 
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse().unwrap());
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/octet-stream".parse().unwrap(),
+    );
     headers.insert(
         axum::http::HeaderName::from_static("x-chunk-hash"),
         boundary.hash.parse().unwrap(),
@@ -468,7 +517,9 @@ async fn list_chunks(
         .get_chunks(&hash)
         .await
         .map(Json)
-        .map_err(|e| ErrorResponse { error: format!("Chunks not found: {e}") })
+        .map_err(|e| ErrorResponse {
+            error: format!("Chunks not found: {e}"),
+        })
 }
 
 async fn list_peers(State(state): State<AppState>) -> Json<Vec<PeerInfo>> {
@@ -494,16 +545,26 @@ async fn get_chunk_legacy(
         .storage
         .read_file(hash)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Failed to read legacy file: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Failed to read legacy file: {e}"),
+        })?;
     let decompressed = decompress_brotli(&data).await?;
     let start = chunk_id as usize * LEGACY_CHUNK_SIZE;
     if start >= decompressed.len() {
         return Err(ErrorResponse {
-            error: format!("Chunk start offset {} exceeds file size {}", start, decompressed.len()),
+            error: format!(
+                "Chunk start offset {} exceeds file size {}",
+                start,
+                decompressed.len()
+            ),
         });
     }
     let end = std::cmp::min(start + LEGACY_CHUNK_SIZE, decompressed.len());
-    Ok((StatusCode::OK, [(header::CONTENT_TYPE, "application/octet-stream")], decompressed[start..end].to_vec())
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        decompressed[start..end].to_vec(),
+    )
         .into_response())
 }
 
@@ -516,6 +577,8 @@ async fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, ErrorResponse> {
     decoder
         .read_to_end(&mut out)
         .await
-        .map_err(|e| ErrorResponse { error: format!("Decompression failed: {e}") })?;
+        .map_err(|e| ErrorResponse {
+            error: format!("Decompression failed: {e}"),
+        })?;
     Ok(out)
 }

@@ -9,7 +9,7 @@ interface Peer {
 
 interface WebSocketMessage {
   type: string
-  [key: string]: any
+  [key: string]: unknown
 }
 
 export function useWebSocket() {
@@ -57,9 +57,9 @@ export function useWebSocket() {
               console.log('Received peer ID:', message.peer_id)
               break
 
-            case 'peer-list':
+            case 'peer-list': {
               // Convert peer IDs to Peer objects
-              const peerObjects: Peer[] = message.peers.map((id: string) => ({
+              const peerObjects: Peer[] = (message.peers as string[]).map((id) => ({
                 id,
                 connected_at: Date.now(),
                 files: [],
@@ -67,6 +67,7 @@ export function useWebSocket() {
               setPeers(peerObjects)
               console.log('Peer list updated:', message.peers)
               break
+            }
 
             case 'signal':
               console.log('Received signal:', message)
@@ -94,7 +95,9 @@ export function useWebSocket() {
     }
   }, [])
 
-  connectRef.current = connect
+  useEffect(() => {
+    connectRef.current = connect
+  })
 
   useEffect(() => {
     connect()

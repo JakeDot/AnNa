@@ -24,7 +24,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({ currentUser }) => {
   }, [])
 
   useEffect(() => {
-    fetchGroups()
+    void fetchGroups()
   }, [fetchGroups])
 
   const handleCreate = async (e: React.FormEvent) => {

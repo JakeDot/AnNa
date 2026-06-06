@@ -412,7 +412,14 @@ impl Database {
             conn.execute(
                 "INSERT OR REPLACE INTO users (id, github_id, email, name, avatar_url, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![user.id, user.github_id, user.email, user.name, user.avatar_url, user.created_at],
+                params![
+                    user.id,
+                    user.github_id,
+                    user.email,
+                    user.name,
+                    user.avatar_url,
+                    user.created_at
+                ],
             )?;
             Ok::<(), anyhow::Error>(())
         })
@@ -479,7 +486,13 @@ impl Database {
             conn.execute(
                 "INSERT INTO groups (id, owner_id, name, description, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![group.id, group.owner_id, group.name, group.description, group.created_at],
+                params![
+                    group.id,
+                    group.owner_id,
+                    group.name,
+                    group.description,
+                    group.created_at
+                ],
             )?;
             Ok::<(), anyhow::Error>(())
         })
@@ -552,7 +565,8 @@ impl Database {
 
     pub async fn add_group_member(&self, group_id: &str, user_id: &str, role: &str) -> Result<()> {
         let pool = self.pool.clone();
-        let (group_id, user_id, role) = (group_id.to_string(), user_id.to_string(), role.to_string());
+        let (group_id, user_id, role) =
+            (group_id.to_string(), user_id.to_string(), role.to_string());
         let joined_at = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -790,7 +804,13 @@ impl Database {
             conn.execute(
                 "INSERT INTO virtual_folders (id, owner_id, name, parent_id, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![folder.id, folder.owner_id, folder.name, folder.parent_id, folder.created_at],
+                params![
+                    folder.id,
+                    folder.owner_id,
+                    folder.name,
+                    folder.parent_id,
+                    folder.created_at
+                ],
             )?;
             Ok::<(), anyhow::Error>(())
         })
@@ -849,7 +869,8 @@ impl Database {
                          FROM virtual_folders WHERE owner_id = ?1 AND parent_id = ?2
                          ORDER BY name",
                     )?;
-                    let result = stmt.query_map(params![oid, pid], rows_to_folder)?
+                    let result = stmt
+                        .query_map(params![oid, pid], rows_to_folder)?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     result
                 }
@@ -859,7 +880,8 @@ impl Database {
                          FROM virtual_folders WHERE owner_id = ?1 AND parent_id IS NULL
                          ORDER BY name",
                     )?;
-                    let result = stmt.query_map(params![oid], rows_to_folder)?
+                    let result = stmt
+                        .query_map(params![oid], rows_to_folder)?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     result
                 }
@@ -869,7 +891,8 @@ impl Database {
                          FROM virtual_folders WHERE parent_id = ?1
                          ORDER BY name",
                     )?;
-                    let result = stmt.query_map(params![pid], rows_to_folder)?
+                    let result = stmt
+                        .query_map(params![pid], rows_to_folder)?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     result
                 }
@@ -900,9 +923,8 @@ impl Database {
         let folder_id = folder_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT file_hash FROM folder_files WHERE folder_id = ?1",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT file_hash FROM folder_files WHERE folder_id = ?1")?;
             let hashes = stmt
                 .query_map(params![folder_id], |row| row.get(0))?
                 .collect::<rusqlite::Result<Vec<String>>>()?;
@@ -926,4 +948,3 @@ impl Database {
         Ok(())
     }
 }
-

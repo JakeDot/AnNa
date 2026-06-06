@@ -6,10 +6,11 @@
 use std::sync::Arc;
 
 use anna_sync_server::{
-    build_router, AppState,
+    build_router,
     database::Database,
     status::ServerMetrics,
     storage::{ChunkTracker, FileStorage},
+    AppState,
 };
 use dashmap::DashMap;
 use futures_util::StreamExt;
@@ -36,7 +37,9 @@ impl TestServer {
         let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
         db.init().await.unwrap();
 
-        let storage = FileStorage::new(storage_dir.path().to_str().unwrap()).await.unwrap();
+        let storage = FileStorage::new(storage_dir.path().to_str().unwrap())
+            .await
+            .unwrap();
 
         let state = AppState {
             db,
@@ -140,7 +143,11 @@ async fn upload_with_backup_flag_succeeds() {
 
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "success");
-    assert_eq!(body["hash"].as_str().unwrap().len(), 64, "BLAKE3 hex is 64 chars");
+    assert_eq!(
+        body["hash"].as_str().unwrap().len(),
+        64,
+        "BLAKE3 hex is 64 chars"
+    );
     assert_eq!(body["size"], data.len() as u64);
     assert!(body["chunk_count"].as_u64().unwrap() >= 1);
 }
@@ -280,7 +287,10 @@ async fn chunk_list_matches_upload_chunk_count() {
 
     assert_eq!(chunks.len() as u64, chunk_count);
     for (i, c) in chunks.iter().enumerate() {
-        assert_eq!(c["chunk_id"], i as u64, "chunks must be ordered and contiguous");
+        assert_eq!(
+            c["chunk_id"], i as u64,
+            "chunks must be ordered and contiguous"
+        );
     }
 }
 
@@ -385,14 +395,18 @@ async fn websocket_join_room_broadcasts_peer_list() {
 
     // s1 joins a room.
     use tokio_tungstenite::tungstenite::Message;
-    s1.send(Message::Text(r#"{"type":"join","room":"test-room"}"#.into()))
-        .await
-        .unwrap();
+    s1.send(Message::Text(
+        r#"{"type":"join","room":"test-room"}"#.into(),
+    ))
+    .await
+    .unwrap();
 
     // s2 joins the same room — s1 should get a peer-list update.
-    s2.send(Message::Text(r#"{"type":"join","room":"test-room"}"#.into()))
-        .await
-        .unwrap();
+    s2.send(Message::Text(
+        r#"{"type":"join","room":"test-room"}"#.into(),
+    ))
+    .await
+    .unwrap();
 
     // s1 should receive a peer-list message.
     let timeout = tokio::time::timeout(std::time::Duration::from_secs(2), s1.next()).await;
