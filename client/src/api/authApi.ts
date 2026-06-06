@@ -43,6 +43,7 @@ export async function getCurrentUser(): Promise<User | null> {
     })
     return response.data
   } catch {
+    clearToken()
     return null
   }
 }

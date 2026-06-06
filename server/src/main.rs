@@ -616,16 +616,29 @@ async fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, ErrorResponse> {
 
 /// POST /api/files/:hash/share
 /// Set the visibility of a file (public / private / group) and optionally
-/// restrict it to a specific group.
+/// restrict it to a specific group. Only the user who originally set the share
+/// can modify it.
 async fn set_file_share(
     State(state): State<AppState>,
-    auth::OptionalUser(user): auth::OptionalUser,
+    auth::CurrentUser(user): auth::CurrentUser,
     Path(hash): Path<String>,
     Json(body): Json<SetShareRequest>,
-) -> Result<StatusCode, ErrorResponse> {
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // If a share already exists for this file, verify the current user is the owner
+    if let Ok(Some(existing_share)) = state.db.get_file_share(&hash).await {
+        if existing_share.owner_id != Some(user.id.clone()) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Only the user who created the share can modify it".to_string(),
+                }),
+            ));
+        }
+    }
+
     let share = FileShare {
         file_hash: hash,
-        owner_id: user.map(|u| u.id),
+        owner_id: Some(user.id),
         visibility: body.visibility,
         group_id: body.group_id,
         created_at: SystemTime::now()
@@ -633,8 +646,13 @@ async fn set_file_share(
             .unwrap()
             .as_secs() as i64,
     };
-    state.db.set_file_share(&share).await.map_err(|e| ErrorResponse {
-        error: format!("Failed to set share: {e}"),
+    state.db.set_file_share(&share).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to set share: {e}"),
+            }),
+        )
     })?;
     Ok(StatusCode::OK)
 }

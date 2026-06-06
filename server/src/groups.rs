@@ -88,19 +88,32 @@ pub async fn list_groups(
 }
 
 /// GET /api/groups/:id
+/// Only group members and the owner can view group details and members.
 pub async fn get_group(
     State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<String>,
 ) -> Result<Json<GroupWithMembers>, (StatusCode, Json<ErrorResponse>)> {
     let group = state.db.get_group(&id).await.map_err(|_| {
         (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "Group not found".to_string() }))
     })?;
+
+    // Check if the user is a member of the group or the owner
     let members = state.db.get_group_members(&id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: format!("Failed to get members: {e}") }),
         )
     })?;
+
+    let is_member = members.iter().any(|m| m.user_id == user.id);
+    if !is_member && group.owner_id != user.id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse { error: "You must be a group member to view this group".to_string() }),
+        ));
+    }
+
     Ok(Json(GroupWithMembers { group, members }))
 }
 

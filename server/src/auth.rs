@@ -23,7 +23,7 @@ pub struct Claims {
 
 fn jwt_secret() -> String {
     std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "default-dev-secret-change-in-production-please".to_string())
+        .expect("JWT_SECRET environment variable must be set")
 }
 
 pub fn create_jwt(user_id: &str, name: &str) -> Result<String, jsonwebtoken::errors::Error> {
@@ -31,7 +31,7 @@ pub fn create_jwt(user_id: &str, name: &str) -> Result<String, jsonwebtoken::err
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as usize
-        + 30 * 24 * 3600; // 30 days
+        + 24 * 3600; // 24 hours
     let claims = Claims { sub: user_id.to_string(), name: name.to_string(), exp };
     encode(
         &Header::default(),

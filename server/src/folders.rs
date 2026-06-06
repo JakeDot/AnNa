@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::{
-    auth::OptionalUser,
+    auth::{CurrentUser, OptionalUser},
     database::VirtualFolder,
     AppState, ErrorResponse,
 };
@@ -66,22 +66,14 @@ pub async fn create_folder(
 }
 
 /// GET /api/folders[?parent_id=...]
+/// Only show folders owned by the authenticated user.
 pub async fn list_folders(
     State(state): State<AppState>,
-    OptionalUser(user): OptionalUser,
+    CurrentUser(user): CurrentUser,
     Query(query): Query<ListFoldersQuery>,
 ) -> Result<Json<Vec<VirtualFolder>>, (StatusCode, Json<ErrorResponse>)> {
-    // Show folders owned by this user (or unowned folders if no auth)
-    let owner_id_str;
-    let owner_id: Option<&str> = match &user {
-        Some(u) => {
-            owner_id_str = u.id.clone();
-            Some(&owner_id_str)
-        }
-        None => None,
-    };
     let parent_id = query.parent_id.as_deref();
-    state.db.list_folders(owner_id, parent_id).await.map(Json).map_err(|e| {
+    state.db.list_folders(Some(&user.id), parent_id).await.map(Json).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: format!("Failed to list folders: {e}") }),
@@ -90,14 +82,25 @@ pub async fn list_folders(
 }
 
 /// GET /api/folders/:id
+/// Only the folder owner can view folder contents.
 pub async fn get_folder_contents(
     State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<String>,
 ) -> Result<Json<FolderContents>, (StatusCode, Json<ErrorResponse>)> {
     let folder = state.db.get_folder(&id).await.map_err(|_| {
         (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "Folder not found".to_string() }))
     })?;
-    let subfolders = state.db.list_folders(None, Some(&id)).await.map_err(|e| {
+
+    // Verify the user owns this folder
+    if folder.owner_id.as_ref() != Some(&user.id) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse { error: "You do not have access to this folder".to_string() }),
+        ));
+    }
+
+    let subfolders = state.db.list_folders(Some(&user.id), Some(&id)).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: format!("Failed to list subfolders: {e}") }),
