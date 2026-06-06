@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getServerUrlSync, setServerUrlSync } from '../lib/serverConfig'
+import { getServerUrlSync, setServerUrl } from '../lib/serverConfig'
 
 interface Props {
   onClose: () => void
@@ -9,9 +9,9 @@ interface Props {
 export function ServerSettings({ onClose, onSave }: Props) {
   const [url, setUrl] = useState(getServerUrlSync())
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmed = url.trim().replace(/\/$/, '')
-    setServerUrlSync(trimmed)
+    await setServerUrl(trimmed)
     onSave(trimmed)
     onClose()
   }

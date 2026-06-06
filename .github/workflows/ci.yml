@@ -18,6 +18,8 @@ jobs:
   server:
     name: Server (Rust)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +59,8 @@ jobs:
   client:
     name: Client (TypeScript)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -85,6 +89,8 @@ jobs:
     name: Tauri (${{ matrix.platform }})
     needs: [server, client]   # only build native apps if server + client pass
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
 
     strategy:
       fail-fast: false

@@ -33,6 +33,32 @@ use storage::{ChunkTracker, FileStorage};
 pub const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024 * 1024;
 const ALT_SVC_MAX_AGE_SECS: u32 = 86400;
 
+// ── Temp file cleanup guard ───────────────────────────────────────────────────
+
+/// Automatically deletes a temp file on Drop unless explicitly disarmed.
+struct TempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -299,10 +325,12 @@ async fn upload_file(
 
     let temp_path =
         temp_file_path.ok_or_else(|| ErrorResponse { error: "No file field in upload".to_string() })?;
+    let guard = TempFileGuard::new(temp_path.clone());
     let filename = filename.unwrap_or_else(|| "unnamed".to_string());
     let hash = hasher.finalize().to_hex().to_string();
 
     if state.storage.file_exists(&hash).await {
+        guard.disarm();
         let _ = tokio::fs::remove_file(&temp_path).await;
         info!("Deduplicated upload: {}", hash);
         let chunk_count = state.chunk_tracker.get_available_chunks(&hash).len() as u32;
@@ -344,6 +372,7 @@ async fn upload_file(
         .await
         .map_err(|e| ErrorResponse { error: format!("Failed to save chunk boundaries: {e}") })?;
 
+    guard.disarm(); // Successfully stored, disarm cleanup
     for b in &boundaries {
         state.chunk_tracker.add_chunk(&hash, b.chunk_id);
     }

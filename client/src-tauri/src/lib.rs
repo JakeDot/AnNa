@@ -3,7 +3,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     net::SocketAddr,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use anyhow::Result;
@@ -57,7 +57,7 @@ pub struct P2pAddress {
 pub struct LocalStore {
     pub db: Pool<SqliteConnectionManager>,
     pub files_dir: PathBuf,
-    pub p2p_addr: String,
+    pub p2p_addr: OnceLock<String>,
 }
 
 impl LocalStore {
@@ -95,7 +95,7 @@ impl LocalStore {
         Ok(Self {
             db,
             files_dir,
-            p2p_addr: String::new(),
+            p2p_addr: OnceLock::new(),
         })
     }
 
@@ -140,7 +140,13 @@ pub async fn store_file(app: AppHandle, file_path: String) -> Result<LocalFile, 
     let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let mime = mime_guess::from_path(&path).first_or_octet_stream().to_string();
 
-    let (hash, size, chunks) = process_file(&path).map_err(|e| e.to_string())?;
+    let path_clone = path.clone();
+    let (hash, size, chunks) = tokio::task::spawn_blocking(move || {
+        process_file(&path_clone)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
 
     let store = app.state::<Arc<LocalStore>>();
 
@@ -197,7 +203,7 @@ pub async fn store_file(app: AppHandle, file_path: String) -> Result<LocalFile, 
 }
 
 #[tauri::command]
-pub async fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> {
+pub fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -224,7 +230,7 @@ pub async fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> 
 }
 
 #[tauri::command]
-pub async fn delete_local_file(app: AppHandle, hash: String) -> Result<(), String> {
+pub fn delete_local_file(app: AppHandle, hash: String) -> Result<(), String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM chunks WHERE file_hash=?1", params![hash])
@@ -238,11 +244,15 @@ pub async fn delete_local_file(app: AppHandle, hash: String) -> Result<(), Strin
 
 #[tauri::command]
 pub fn get_p2p_address(app: AppHandle) -> String {
-    app.state::<Arc<LocalStore>>().p2p_addr.clone()
+    app.state::<Arc<LocalStore>>()
+        .p2p_addr
+        .get()
+        .cloned()
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub async fn get_local_chunks(app: AppHandle, hash: String) -> Result<Vec<ChunkBoundary>, String> {
+pub fn get_local_chunks(app: AppHandle, hash: String) -> Result<Vec<ChunkBoundary>, String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -286,9 +296,9 @@ pub async fn backup_to_server(
         .map_err(|e| e.to_string())?;
 
     let file_path = store.file_path(&hash);
-    let bytes = fs::read(&file_path).map_err(|e| e.to_string())?;
+    let file = tokio::fs::File::open(&file_path).await.map_err(|e| e.to_string())?;
 
-    let part = multipart::Part::bytes(bytes)
+    let part = multipart::Part::stream(file)
         .file_name(name)
         .mime_str(&mime)
         .map_err(|e| e.to_string())?;
@@ -335,28 +345,36 @@ pub async fn restore_from_server(
     let name = meta["name"].as_str().unwrap_or("unknown").to_string();
     let mime = meta["mime_type"].as_str().unwrap_or("application/octet-stream").to_string();
 
-    // Download bytes
-    let bytes = client
+    // Download bytes streaming to disk
+    let mut resp = client
         .get(format!("{}/api/download/{}", server_url.trim_end_matches('/'), hash))
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
         .map_err(|e| e.to_string())?;
 
-    // Write to temp file then store locally
     let tmp = std::env::temp_dir().join(format!("anna_restore_{}", hash));
-    fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    {
+        let mut tmp_file = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
+        use tokio::io::AsyncWriteExt;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            tmp_file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        }
+    }
 
     // Use store_file logic inline (can't call Tauri cmd from Rust easily)
-    let (fhash, size, chunks) = process_file(&tmp).map_err(|e| e.to_string())?;
+    let tmp_clone = tmp.clone();
+    let (fhash, size, chunks) = tokio::task::spawn_blocking(move || {
+        process_file(&tmp_clone)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
     let _ = fs::remove_file(&tmp);
 
     let conn = store.db.get().map_err(|e| e.to_string())?;
     let dest = store.file_path(&fhash);
     fs::create_dir_all(dest.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    fs::copy(&tmp, &dest).map_err(|e| e.to_string())?;
 
     let now = Utc::now().timestamp();
     let chunk_count = chunks.len() as u32;
@@ -521,20 +539,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("no app data dir");
-            let mut store = LocalStore::new(data_dir)?;
+            let store = LocalStore::new(data_dir)?;
+            let store_arc = Arc::new(store);
 
             // Start the P2P HTTP server and record its LAN address.
-            // setup() runs inside the Tokio runtime so block_on is not needed.
-            let store_arc = Arc::new(store);
             let addr = tauri::async_runtime::block_on(start_p2p_server(store_arc.clone()))?;
-            // SAFETY: no other Arc clones exist yet at this point.
-            Arc::get_mut(&mut Arc::clone(&store_arc))
-                .map(|s| s.p2p_addr = addr.clone());
-            // Rebuild with the address in place (single allocation path).
-            let data_dir2 = app.path().app_data_dir().expect("no app data dir");
-            let mut final_store = LocalStore::new(data_dir2)?;
-            final_store.p2p_addr = addr;
-            app.manage(Arc::new(final_store));
+            let _ = store_arc.p2p_addr.set(addr);
+
+            app.manage(store_arc);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

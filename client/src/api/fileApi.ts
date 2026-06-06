@@ -86,18 +86,40 @@ export async function downloadFile(
   // Try each peer's P2P HTTP server first
   for (const addr of peerAddresses) {
     try {
-      const resp = await fetch(`http://${addr}/p2p/chunk/${hash}/0`, { signal: AbortSignal.timeout(3000) })
-      if (resp.ok) {
-        // For now fetch chunk 0 as a smoke-test; full reassembly would iterate all chunks
-        // This is intentionally simple — full streaming reassembly is a follow-up
-        break
+      // Get chunks list
+      const chunksResp = await fetch(`http://${addr}/p2p/chunks/${hash}`, { signal: AbortSignal.timeout(3000) })
+      if (!chunksResp.ok) continue
+
+      const chunks = await chunksResp.json() as { chunk_id: number }[]
+
+      // Download all chunks from peer
+      const chunkBlobs: Blob[] = []
+      let success = true
+      for (const chunk of chunks) {
+        try {
+          const chunkResp = await fetch(`http://${addr}/p2p/chunk/${hash}/${chunk.chunk_id}`, {
+            signal: AbortSignal.timeout(3000)
+          })
+          if (!chunkResp.ok) {
+            success = false
+            break
+          }
+          chunkBlobs.push(await chunkResp.blob())
+        } catch {
+          success = false
+          break
+        }
+      }
+
+      if (success && chunkBlobs.length > 0) {
+        return new Blob(chunkBlobs)
       }
     } catch {
       // peer unreachable, try next
     }
   }
 
-  // Fall back to server
+  // Fall back to server only if all P2P attempts fail
   const resp = await axios.get(`${getServerUrlSync()}/api/download/${hash}`, {
     responseType: 'blob',
   })
