@@ -357,3 +357,9 @@ impl ChunkTracker {
             .unwrap_or(ChunkState::Missing)
     }
 }
+
+impl Default for ChunkTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}

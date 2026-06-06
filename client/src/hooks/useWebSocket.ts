@@ -53,7 +53,7 @@ export function useWebSocket() {
 
           switch (message.type) {
             case 'welcome':
-              setPeerId(message.peer_id)
+              setPeerId(message.peer_id as string)
               console.log('Received peer ID:', message.peer_id)
               break
 

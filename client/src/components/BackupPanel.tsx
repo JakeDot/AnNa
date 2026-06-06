@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { backupToServer, restoreFromServer, listServerFiles, LocalFile } from '../api/fileApi'
+import { backupToServer, restoreFromServer, listServerFiles } from '../api/fileApi'
+import type { LocalFile } from '../api/fileApi'
 import { formatBytes } from '../api/statusApi'
 
 interface Props {
