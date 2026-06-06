@@ -13,7 +13,7 @@ use anna_sync_server::{
     AppState,
 };
 use dashmap::DashMap;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use reqwest::{multipart, Client, StatusCode};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
