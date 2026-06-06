@@ -23,6 +23,7 @@ export const LabelManager: React.FC<LabelManagerProps> = ({ currentUser }) => {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchLabels()
   }, [fetchLabels])
 

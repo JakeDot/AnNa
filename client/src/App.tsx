@@ -53,7 +53,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    fetchFiles()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchFiles()
     if (isTauri()) {
       getP2pAddress().then(setP2pAddr).catch(console.error)
     }
