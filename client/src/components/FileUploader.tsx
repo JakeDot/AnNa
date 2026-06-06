@@ -6,17 +6,22 @@ interface FileUploaderProps {
 }
 
 export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, uploading }) => {
+  const uploadAll = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) return
+      // Upload files sequentially to avoid overloading the server
+      files.reduce((chain, file) => chain.then(() => onUpload(file)), Promise.resolve())
+    },
+    [onUpload]
+  )
+
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault()
       if (uploading) return
-
-      const files = Array.from(e.dataTransfer.files)
-      if (files.length > 0) {
-        onUpload(files[0])
-      }
+      uploadAll(Array.from(e.dataTransfer.files))
     },
-    [onUpload, uploading]
+    [uploading, uploadAll]
   )
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -24,9 +29,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, uploading 
   }
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files && files.length > 0) {
-      onUpload(files[0])
+    if (e.target.files && e.target.files.length > 0) {
+      uploadAll(Array.from(e.target.files))
+      // Reset input so the same file(s) can be re-uploaded if needed
+      e.target.value = ''
     }
   }
 
@@ -46,17 +52,35 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, uploading 
           <div className="upload-icon">📁</div>
           <p>Drag and drop files here</p>
           <p className="upload-or">or</p>
-          <label className="file-input-label">
-            <input
-              type="file"
-              onChange={handleFileInput}
-              disabled={uploading}
-              style={{ display: 'none' }}
-            />
-            <span className="button">Choose File</span>
-          </label>
+          <div className="upload-buttons">
+            <label className="file-input-label">
+              <input
+                type="file"
+                multiple
+                onChange={handleFileInput}
+                disabled={uploading}
+                style={{ display: 'none' }}
+              />
+              <span className="button">Choose Files</span>
+            </label>
+            <label className="file-input-label">
+              {/* webkitdirectory lets the user pick an entire folder */}
+              <input
+                type="file"
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore — non-standard but universally supported attribute
+                webkitdirectory=""
+                multiple
+                onChange={handleFileInput}
+                disabled={uploading}
+                style={{ display: 'none' }}
+              />
+              <span className="button">Upload Folder</span>
+            </label>
+          </div>
         </>
       )}
     </div>
   )
 }
+

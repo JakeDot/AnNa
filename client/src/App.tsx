@@ -7,10 +7,15 @@ import { PeerStatus } from './components/PeerStatus'
 import { AdminPanel } from './components/AdminPanel'
 import { BackupPanel } from './components/BackupPanel'
 import { ServerSettings } from './components/ServerSettings'
+import { LoginButton } from './components/LoginButton'
+import { GroupsPanel } from './components/GroupsPanel'
+import { LabelManager } from './components/LabelManager'
 import { useWebSocket } from './hooks/useWebSocket'
 import { uploadFile, listLocalFiles, getP2pAddress, LocalFile } from './api/fileApi'
+import { getCurrentUser, setToken, getToken } from './api/authApi'
+import type { User } from './api/authApi'
 
-type Tab = 'files' | 'backup' | 'admin'
+type Tab = 'files' | 'backup' | 'groups' | 'labels' | 'admin'
 
 function App() {
   const [files, setFiles] = useState<LocalFile[]>([])
@@ -18,7 +23,25 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>('files')
   const [showSettings, setShowSettings] = useState(false)
   const [p2pAddr, setP2pAddr] = useState<string>('')
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const { connected, peers, sendMessage } = useWebSocket()
+
+  // Handle OAuth callback: extract token from ?token=... query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (token) {
+      setToken(token)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  // Restore logged-in user from stored token
+  useEffect(() => {
+    if (getToken()) {
+      getCurrentUser().then(user => setCurrentUser(user))
+    }
+  }, [])
 
   const fetchFiles = useCallback(async () => {
     try {
@@ -60,21 +83,30 @@ function App() {
     })
   }
 
+  const handleLogout = () => {
+    setCurrentUser(null)
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ãnn@sync</h1>
-        <p className="tagline">P2P File Sync Platform</p>
-        <div className="header-right">
-          <PeerStatus connected={connected} peerCount={peers.length} />
-          <button
-            className="settings-btn"
-            onClick={() => setShowSettings(true)}
-            title="Server settings"
-          >
-            ⚙
-          </button>
+        <div className="header-top">
+          <div>
+            <h1>ãnn@sync</h1>
+            <p className="tagline">P2P File Sync Platform</p>
+          </div>
+          <div className="header-right">
+            <LoginButton user={currentUser} onLogout={handleLogout} />
+            <button
+              className="settings-btn"
+              onClick={() => setShowSettings(true)}
+              title="Server settings"
+            >
+              ⚙
+            </button>
+          </div>
         </div>
+        <PeerStatus connected={connected} peerCount={peers.length} />
       </header>
 
       <nav className="app-tabs">
@@ -89,6 +121,18 @@ function App() {
           onClick={() => setActiveTab('backup')}
         >
           ☁ Backup
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'groups' ? 'active' : ''}`}
+          onClick={() => setActiveTab('groups')}
+        >
+          👥 Groups
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'labels' ? 'active' : ''}`}
+          onClick={() => setActiveTab('labels')}
+        >
+          🏷️ Labels
         </button>
         <button
           className={`tab-btn ${activeTab === 'admin' ? 'active' : ''}`}
@@ -127,6 +171,10 @@ function App() {
             <BackupPanel localFiles={files} onRestored={handleRestored} />
           </section>
         )}
+
+        {activeTab === 'groups' && <GroupsPanel currentUser={currentUser} />}
+
+        {activeTab === 'labels' && <LabelManager currentUser={currentUser} />}
 
         {activeTab === 'admin' && <AdminPanel />}
       </main>
