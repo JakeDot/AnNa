@@ -6,6 +6,14 @@ identity and drop this note.
 
 ---
 
+## Branch naming
+
+- Never use a `claude/` prefix on branch names. That prefix is an
+  auto-generated default and produces meaningless names like
+  `claude/peaceful-shannon-nt4S8`.
+- If no branch name has been provided for a task, **ask the user for
+  one before creating the branch**. Do not invent a name.
+
 ## Commit style
 
 ### Focused commits
