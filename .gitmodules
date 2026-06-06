@@ -1,0 +1,3 @@
+[submodule ".github/agents/claude"]
+	path = .github/agents/claude
+	url = https://github.com/JakeDot/claude-setup.git
