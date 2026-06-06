@@ -873,16 +873,7 @@ impl Database {
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     result
                 }
-                (None, None) => {
-                    let mut stmt = conn.prepare(
-                        "SELECT id, owner_id, name, parent_id, created_at
-                         FROM virtual_folders WHERE parent_id IS NULL
-                         ORDER BY name",
-                    )?;
-                    let result = stmt.query_map([], rows_to_folder)?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    result
-                }
+                (None, None) => vec![],
             };
             Ok::<Vec<VirtualFolder>, anyhow::Error>(folders)
         })
