@@ -584,3 +584,71 @@
 .btn-secondary:hover {
   background: rgba(255,255,255,0.06);
 }
+
+.section-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: -0.5rem 0 1rem;
+}
+
+.section-hint code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+.backup-section {
+  margin-bottom: 3rem;
+}
+
+.backup-section h2 {
+  margin-bottom: 0.5rem;
+  color: var(--text-h);
+}
+
+.backup-panel {
+  background: var(--social-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.backup-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.backup-tab {
+  flex: 1;
+  padding: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background 0.2s, color 0.2s;
+}
+
+.backup-tab:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.backup-tab.active {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+.backup-status {
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+
+.backup-panel .admin-table {
+  margin: 0;
+}
+
+.backup-panel .admin-empty {
+  padding: 1.5rem;
+}

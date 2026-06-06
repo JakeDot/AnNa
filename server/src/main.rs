@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, State, WebSocketUpgrade},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State, WebSocketUpgrade},
     http::{header, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
@@ -260,10 +260,25 @@ async fn list_files(
 /// | Brotli-compress before storing        | Store raw; HTTP layer compresses       |
 /// | Fixed 256 KB chunks                   | FastCDC variable-size chunks (256K–4M) |
 /// | Chunk boundaries guessed at serve time| Exact boundaries stored in `chunks` DB |
+#[derive(serde::Deserialize, Default)]
+struct UploadQuery {
+    /// Must be `true` for the server to accept and persist the file.
+    /// Without this flag the server rejects the upload — files are stored
+    /// locally on device and only backed up to the server on explicit request.
+    backup: Option<String>,
+}
+
 async fn upload_file(
     State(state): State<AppState>,
+    Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResponse>, ErrorResponse> {
+    if query.backup.as_deref() != Some("true") {
+        return Err(ErrorResponse {
+            error: "Direct uploads are disabled. Use ?backup=true to explicitly back up a file."
+                .to_string(),
+        });
+    }
     let mut temp_file_path: Option<PathBuf> = None;
     let mut filename: Option<String> = None;
     let mut mime_type = "application/octet-stream".to_string();
