@@ -1,0 +1,26 @@
+name: Docker Smoke Test
+
+on:
+  push:
+    branches: [main, testing, staging]
+  workflow_dispatch: {}
+  schedule:
+    # Daily health check of the published Docker image.
+    - cron: "0 5 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Build image & exercise live API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run smoke test
+        run: ./scripts/smoke-test.sh
