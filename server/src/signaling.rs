@@ -195,10 +195,16 @@ async fn handle_message(
                 match serde_json::to_string(&forward) {
                     Ok(msg) => {
                         if target_tx.send(msg).is_err() {
-                            warn!("Signal from {} to {} dropped: target channel closed", peer_id, to);
+                            warn!(
+                                "Signal from {} to {} dropped: target channel closed",
+                                peer_id, to
+                            );
                         }
                     }
-                    Err(e) => warn!("Failed to serialize signal from {} to {}: {}", peer_id, to, e),
+                    Err(e) => warn!(
+                        "Failed to serialize signal from {} to {}: {}",
+                        peer_id, to, e
+                    ),
                 }
             } else {
                 let err = serde_json::json!({
@@ -218,9 +224,11 @@ async fn handle_message(
             for file_hash in files {
                 if let Ok(metadata) = state.db.get_file(&file_hash).await {
                     for chunk_id in 0..metadata.chunk_count {
-                        state
-                            .chunk_tracker
-                            .add_peer_chunk(&file_hash, chunk_id, peer_id.to_string());
+                        state.chunk_tracker.add_peer_chunk(
+                            &file_hash,
+                            chunk_id,
+                            peer_id.to_string(),
+                        );
                     }
                 }
             }
@@ -273,7 +281,10 @@ async fn handle_message(
             file_hash,
             chunk_id,
         } => {
-            info!("Peer {} requested chunk {} of {}", peer_id, chunk_id, file_hash);
+            info!(
+                "Peer {} requested chunk {} of {}",
+                peer_id, chunk_id, file_hash
+            );
             let peers = state
                 .chunk_tracker
                 .get_peers_for_chunk(&file_hash, chunk_id);
@@ -293,4 +304,3 @@ async fn handle_message(
 
     Ok(())
 }
-

@@ -23,8 +23,9 @@ export const AdminPanel: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    fetchStatus()
-    const id = setInterval(fetchStatus, POLL_INTERVAL_MS)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchStatus()
+    const id = setInterval(() => void fetchStatus(), POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [fetchStatus])
 

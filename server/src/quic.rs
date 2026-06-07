@@ -62,7 +62,10 @@ pub async fn serve_quic_mgmt(
     metrics: Arc<ServerMetrics>,
 ) -> Result<()> {
     let endpoint = build_endpoint(addr)?;
-    info!("QUIC management listener ready on {}", endpoint.local_addr()?);
+    info!(
+        "QUIC management listener ready on {}",
+        endpoint.local_addr()?
+    );
     accept_loop(endpoint, Arc::new(mgmt_router), metrics).await
 }
 

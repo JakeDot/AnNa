@@ -1,5 +1,5 @@
 import React from 'react'
-import type { FileMetadata } from '../App'
+import type { FileMetadata } from '../api/fileApi'
 import { getDownloadUrl } from '../api/fileApi'
 
 interface FileListProps {

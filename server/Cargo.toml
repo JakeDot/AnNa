@@ -4,6 +4,14 @@ version = "0.4.5"
 edition = "2021"
 authors = ["AnNa Team"]
 
+[[bin]]
+name = "anna-sync-server"
+path = "src/main.rs"
+
+[lib]
+name = "anna_sync_server"
+path = "src/lib.rs"
+
 [dependencies]
 # Web framework with HTTP/2 and HTTP/3 support
 axum = { version = "0.7", features = ["http2", "ws", "multipart"] }
@@ -78,3 +86,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tempfile = "3"
+serde_json = "1.0"
