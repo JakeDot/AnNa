@@ -24,6 +24,7 @@ use reqwest::multipart;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_store::StoreExt;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
@@ -135,7 +136,7 @@ fn process_file(path: &PathBuf) -> Result<(String, u64, Vec<ChunkBoundary>)> {
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn store_file(app: AppHandle, file_path: String) -> Result<LocalFile, String> {
+async fn store_file(app: AppHandle, file_path: String) -> Result<LocalFile, String> {
     let path = PathBuf::from(&file_path);
     let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let mime = mime_guess::from_path(&path).first_or_octet_stream().to_string();
@@ -203,7 +204,7 @@ pub async fn store_file(app: AppHandle, file_path: String) -> Result<LocalFile, 
 }
 
 #[tauri::command]
-pub fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> {
+fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -230,7 +231,7 @@ pub fn list_local_files(app: AppHandle) -> Result<Vec<LocalFile>, String> {
 }
 
 #[tauri::command]
-pub fn delete_local_file(app: AppHandle, hash: String) -> Result<(), String> {
+fn delete_local_file(app: AppHandle, hash: String) -> Result<(), String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM chunks WHERE file_hash=?1", params![hash])
@@ -243,7 +244,7 @@ pub fn delete_local_file(app: AppHandle, hash: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_p2p_address(app: AppHandle) -> String {
+fn get_p2p_address(app: AppHandle) -> String {
     app.state::<Arc<LocalStore>>()
         .p2p_addr
         .get()
@@ -252,7 +253,7 @@ pub fn get_p2p_address(app: AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn get_local_chunks(app: AppHandle, hash: String) -> Result<Vec<ChunkBoundary>, String> {
+fn get_local_chunks(app: AppHandle, hash: String) -> Result<Vec<ChunkBoundary>, String> {
     let store = app.state::<Arc<LocalStore>>();
     let conn = store.db.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -279,7 +280,7 @@ pub fn get_local_chunks(app: AppHandle, hash: String) -> Result<Vec<ChunkBoundar
 // ── Server backup / restore ───────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn backup_to_server(
+async fn backup_to_server(
     app: AppHandle,
     hash: String,
     server_url: String,
@@ -319,7 +320,7 @@ pub async fn backup_to_server(
 }
 
 #[tauri::command]
-pub async fn restore_from_server(
+async fn restore_from_server(
     app: AppHandle,
     hash: String,
     server_url: String,
@@ -510,23 +511,18 @@ pub async fn start_p2p_server(store: Arc<LocalStore>) -> Result<String> {
 
 #[tauri::command]
 fn get_server_url(app: AppHandle) -> String {
-    let store = app.state::<tauri_plugin_store::StoreCollection<tauri::Wry>>();
-    tauri_plugin_store::with_store(app.clone(), store, "settings.json", |s| {
-        Ok(s.get("server_url")
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| "http://localhost:3000".to_string()))
-    })
-    .unwrap_or_else(|_| "http://localhost:3000".to_string())
+    app.store("settings.json")
+        .ok()
+        .and_then(|s| s.get("server_url"))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "http://localhost:3000".to_string())
 }
 
 #[tauri::command]
 fn set_server_url(app: AppHandle, url: String) -> Result<(), String> {
-    let store = app.state::<tauri_plugin_store::StoreCollection<tauri::Wry>>();
-    tauri_plugin_store::with_store(app.clone(), store, "settings.json", |s| {
-        s.insert("server_url".to_string(), serde_json::json!(url))?;
-        s.save()
-    })
-    .map_err(|e| e.to_string())
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("server_url".to_string(), serde_json::json!(url));
+    store.save().map_err(|e| e.to_string())
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
