@@ -1,18 +1,20 @@
-name: Docker Smoke Test
+name: Docker Smoke Test (scheduled)
+
+# Per-build smoke testing now runs as part of ci.yml (job `smoke`, gated on
+# the server build/test job). This workflow covers the case ci.yml doesn't:
+# a periodic check that the Docker image still builds and serves traffic
+# correctly even on days with no pushes, plus an on-demand manual run.
 
 on:
-  push:
-    branches: [main, testing, staging]
   workflow_dispatch: {}
   schedule:
-    # Daily health check of the published Docker image.
     - cron: "0 5 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: smoke-test-${{ github.ref }}
+  group: smoke-test-scheduled
   cancel-in-progress: true
 
 jobs:
