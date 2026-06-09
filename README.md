@@ -157,3 +157,50 @@ MIT License - see LICENSE file for details
 ## Contact
 
 For questions or support, please open an issue on GitHub.
+
+---
+
+## 🔬 AI/ML Features
+
+**AnNa is a file-sync tool only.** No AI, ML, or ML dependencies are included in the core.
+
+If you need intelligent file analysis, classification, or metadata extraction, use the companion project:
+
+### **[AnNa-ML](https://github.com/JakeDot/AnNa-ML)** — AI/ML Satellite Service
+
+AnNa-ML provides:
+- 📊 File classification and content analysis
+- 🔍 Metadata extraction (documents, images, code)
+- 🛡️ Security scanning and threat detection
+- 🔗 Semantic search and similarity detection
+
+**Key design principle:** AnNa-ML is **completely optional** and **independently deployable**. AnNa continues working perfectly without it:
+
+```
+┌─────────────────────────────────────────┐
+│        AnNa File-Sync Engine            │
+│  (Rust + Tokio, ~2MB, zero ML bloat)    │
+└──────────────┬──────────────────────────┘
+               │ REST API
+               ↓ (optional)
+┌─────────────────────────────────────────┐
+│     AnNa-ML Service (separate repo)     │
+│  (Rust + Axum + ONNX, ML-complete)      │
+└─────────────────────────────────────────┘
+```
+
+**Installation:** If you want AI features, start AnNa-ML as a separate service. If you don't, AnNa runs alone.
+
+**Data flow:** AnNa detects AnNa-ML via service discovery. When available, file metadata is enriched. When unavailable, AnNa still syncs perfectly.
+
+---
+
+## Architecture Philosophy
+
+1. **File-sync is orthogonal to ML analysis**
+2. **Heavy dependencies (CUDA, Python, ONNX) belong elsewhere**
+3. **Users who want lightweight sync shouldn't pay ML tax**
+4. **Microservices pattern keeps responsibilities clear**
+
+See [AnNa-ML Architecture](https://github.com/JakeDot/AnNa-ML#architecture-principle) for detailed design.
+
