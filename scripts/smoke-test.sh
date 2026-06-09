@@ -27,16 +27,24 @@ echo "==> Starting container"
 docker run -d --name "$CONTAINER" -p "${HOST_PORT}:3000" "$IMAGE" >/dev/null
 
 echo "==> Waiting for server to become reachable"
+server_ready=false
 for _ in $(seq 1 30); do
     if curl -sf "${BASE_URL}/api/status" >/dev/null; then
+        server_ready=true
         break
     fi
     sleep 1
 done
+if [ "$server_ready" = false ]; then
+    echo "FAIL: server did not become reachable within 30 seconds"
+    docker logs "$CONTAINER"
+    exit 1
+fi
 
 echo "==> GET /api/status"
 status_json=$(curl -sf "${BASE_URL}/api/status")
-echo "$status_json" | grep -q '"version"' || { echo "FAIL: /api/status missing 'version'"; exit 1; }
+echo "$status_json" | jq -e '.version != null' >/dev/null \
+    || { echo "FAIL: /api/status missing 'version'"; exit 1; }
 
 echo "==> Upload gate: POST /api/upload without ?backup=true must be rejected"
 echo "smoke" > "${WORKDIR}/payload.txt"
@@ -46,12 +54,12 @@ gate_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F "file=@${WORKDIR}/
 echo "==> Upload round-trip: POST /api/upload?backup=true"
 printf 'AnNa smoke test payload %s\n' "$(date -u +%s)" > "${WORKDIR}/payload.txt"
 upload_json=$(curl -sf -X POST -F "file=@${WORKDIR}/payload.txt" "${BASE_URL}/api/upload?backup=true")
-hash=$(printf '%s' "$upload_json" | sed -n 's/.*"hash":"\([a-f0-9]\{64\}\)".*/\1/p')
+hash=$(echo "$upload_json" | jq -r '.hash // empty')
 [ -n "$hash" ] || { echo "FAIL: upload response missing hash: $upload_json"; exit 1; }
 echo "    stored as $hash"
 
 echo "==> GET /api/files/check/:hash"
-curl -sf "${BASE_URL}/api/files/check/${hash}" | grep -q '"exists"' \
+curl -sf "${BASE_URL}/api/files/check/${hash}" | jq -e '.exists == true' >/dev/null \
     || { echo "FAIL: file not reported as existing by hash"; exit 1; }
 
 echo "==> GET /api/download/:hash (content must round-trip)"
