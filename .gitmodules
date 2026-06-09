@@ -2,6 +2,3 @@
 	path = .github/agents/claude
 	url = https://github.com/JakeDot/jd-ai-review-action.git
 	branch = main
-[submodule "plan"]
-	path = plan
-	url = https://github.com/JakeDot/plan.git
