@@ -6,6 +6,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use anna_sync_server;
+
 use anyhow::Result;
 use axum::{
     body::Body,
@@ -525,6 +527,80 @@ fn set_server_url(app: AppHandle, url: String) -> Result<(), String> {
     store.save().map_err(|e| e.to_string())
 }
 
+// ── Central-device mode (embedded AnNa server) ───────────────────────────────
+
+/// Tracks the embedded server spawned when this device acts as the central
+/// sync node. Stored in Tauri's managed state.
+pub struct CentralDeviceState {
+    abort: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
+    url: std::sync::OnceLock<String>,
+}
+
+impl CentralDeviceState {
+    fn new() -> Self {
+        Self {
+            abort: std::sync::Mutex::new(None),
+            url: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+/// Start the embedded AnNa server in client mode on the given port (0 = OS
+/// picks a free port). Sets the active server URL to `http://127.0.0.1:{port}`
+/// so the frontend can use the same API it would use with a hosted server.
+#[tauri::command]
+async fn start_as_central_device(app: AppHandle, port: u16) -> Result<String, String> {
+    let central = app.state::<CentralDeviceState>();
+
+    // Already running — return the existing URL.
+    if let Some(url) = central.url.get() {
+        return Ok(url.clone());
+    }
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("server");
+
+    let (addr, abort_handle) =
+        anna_sync_server::start_embedded(&data_dir, port)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let url = format!("http://{addr}");
+    let _ = central.url.set(url.clone());
+    *central.abort.lock().unwrap() = Some(abort_handle);
+
+    // Point the configured server URL to the embedded instance.
+    if let Ok(store) = app.store("settings.json") {
+        store.set("server_url".to_string(), serde_json::json!(url));
+        let _ = store.save();
+    }
+
+    Ok(url)
+}
+
+/// Stop the embedded server and clear the central-device state.
+#[tauri::command]
+fn stop_central_device(app: AppHandle) {
+    let central = app.state::<CentralDeviceState>();
+    if let Some(handle) = central.abort.lock().unwrap().take() {
+        handle.abort();
+    }
+}
+
+/// Returns the URL of the running embedded server, or an empty string if not
+/// running.
+#[tauri::command]
+fn get_central_device_url(app: AppHandle) -> String {
+    app.state::<CentralDeviceState>()
+        .url
+        .get()
+        .cloned()
+        .unwrap_or_default()
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -544,6 +620,7 @@ pub fn run() {
             let _ = store_arc.p2p_addr.set(addr);
 
             app.manage(store_arc);
+            app.manage(CentralDeviceState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -556,6 +633,9 @@ pub fn run() {
             restore_from_server,
             get_server_url,
             set_server_url,
+            start_as_central_device,
+            stop_central_device,
+            get_central_device_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

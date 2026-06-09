@@ -47,23 +47,20 @@ fastcdc = "3.1"
 brotli = "3.5"
 async-compression = { version = "0.4", features = ["tokio", "brotli", "zstd"] }
 
-# QUIC / HTTP3
-# quinn: QUIC transport layer (RFC 9000)
-# h3: HTTP/3 framing over QUIC streams
-# h3-quinn: binds h3 to quinn's async stream API
-# h3-axum: bridges h3 connection acceptance to Axum's Router
-quinn = "0.11"
-h3 = "0.0.8"
-h3-quinn = "0.0.10"
+# QUIC / HTTP3 — optional; disable via default-features = false when embedding
+# the server in a desktop app (e.g. Tauri) to avoid the heavy TLS/QUIC deps.
+quinn = { version = "0.11", optional = true }
+h3 = { version = "0.0.8", optional = true }
+h3-quinn = { version = "0.0.10", optional = true }
 
 # TLS (required by QUIC; rcgen generates a self-signed cert at startup)
-rustls = { version = "0.23", features = ["ring"] }
-rustls-pemfile = "2"
-rcgen = "0.13"
+rustls = { version = "0.23", features = ["ring"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
+rcgen = { version = "0.13", optional = true }
 
 # HTTP body utilities (used in QUIC request adapter)
-http-body-util = "0.1"
-bytes = "1"
+http-body-util = { version = "0.1", optional = true }
+bytes = { version = "1", optional = true }
 
 # Logging and tracing
 tracing = "0.1"
@@ -80,6 +77,19 @@ dashmap = "5.5"
 jsonwebtoken = "9"
 reqwest = { version = "0.12", features = ["json"] }
 async-trait = "0.1"
+
+[features]
+default = ["quic"]
+quic = [
+    "dep:quinn",
+    "dep:h3",
+    "dep:h3-quinn",
+    "dep:rustls",
+    "dep:rustls-pemfile",
+    "dep:rcgen",
+    "dep:http-body-util",
+    "dep:bytes",
+]
 
 [profile.release]
 opt-level = 3

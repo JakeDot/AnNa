@@ -1,5 +1,6 @@
 pub mod cdc;
 pub mod database;
+#[cfg(feature = "quic")]
 pub mod quic;
 pub mod signaling;
 pub mod status;
@@ -200,49 +201,112 @@ pub async fn run() -> anyhow::Result<()> {
         client_mode,
     };
 
-    let alt_svc_value = format!(
-        "h3=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}, h3-29=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}"
-    );
-    let alt_svc_header_value = alt_svc_value
-        .parse::<header::HeaderValue>()
-        .expect("Alt-Svc header value is always valid ASCII");
+    #[cfg(feature = "quic")]
+    let alt_svc_header_value = {
+        let v = format!(
+            "h3=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}, h3-29=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECS}"
+        );
+        v.parse::<header::HeaderValue>()
+            .expect("Alt-Svc header value is always valid ASCII")
+    };
 
+    #[cfg(feature = "quic")]
     let app = build_router(state.clone(), &public_dir, Some(alt_svc_header_value));
+    #[cfg(not(feature = "quic"))]
+    let app = build_router(state.clone(), &public_dir, None);
 
-    let mgmt_router = Router::new()
+    let mgmt_router: Router = Router::new()
         .route("/api/status", get(status_handler))
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
 
-    let quic_addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let mgmt_addr = SocketAddr::from(([0, 0, 0, 0], mgmt_port));
+    #[cfg(feature = "quic")]
+    {
+        let quic_addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let mgmt_addr = SocketAddr::from(([0, 0, 0, 0], mgmt_port));
 
-    let app_for_quic = app.clone();
-    tokio::spawn({
-        let m = metrics.clone();
-        async move {
-            if let Err(e) = quic::serve_quic(quic_addr, app_for_quic, m).await {
-                tracing::error!("QUIC listener error: {e}");
+        let app_for_quic = app.clone();
+        tokio::spawn({
+            let m = metrics.clone();
+            async move {
+                if let Err(e) = quic::serve_quic(quic_addr, app_for_quic, m).await {
+                    tracing::error!("QUIC listener error: {e}");
+                }
             }
-        }
-    });
+        });
 
-    tokio::spawn({
-        let m = metrics.clone();
-        async move {
-            if let Err(e) = quic::serve_quic_mgmt(mgmt_addr, mgmt_router, m).await {
-                tracing::error!("QUIC management listener error: {e}");
+        tokio::spawn({
+            let m = metrics.clone();
+            async move {
+                if let Err(e) = quic::serve_quic_mgmt(mgmt_addr, mgmt_router, m).await {
+                    tracing::error!("QUIC management listener error: {e}");
+                }
             }
-        }
-    });
+        });
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("HTTP/1.1+2 on tcp:{port}  |  QUIC/HTTP3 on udp:{port}  |  QUIC mgmt on udp:{mgmt_port}");
+        info!("HTTP/1.1+2 on tcp:{port}  |  QUIC/HTTP3 on udp:{port}  |  QUIC mgmt on udp:{mgmt_port}");
+    }
+    #[cfg(not(feature = "quic"))]
+    {
+        let _ = mgmt_router;
+        info!("HTTP/1.1+2 on tcp:{port} (QUIC disabled)");
+    }
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let tcp_addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(tcp_addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// ── Embedded startup (for desktop / Tauri use) ───────────────────────────────
+
+/// Start the server in-process, bound to `127.0.0.1:port` (port 0 = OS picks
+/// a free port). Runs in client mode so uploads require no `?backup=true`.
+/// Does not start QUIC or initialise tracing — the host process owns those.
+///
+/// Returns the bound address and an abort handle so the caller can stop the
+/// server (e.g. when the desktop app quits).
+pub async fn start_embedded(
+    data_dir: &std::path::Path,
+    port: u16,
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::AbortHandle)> {
+    tokio::fs::create_dir_all(data_dir).await?;
+
+    let db_path = data_dir.join("metadata.db");
+    let db = Database::new(
+        db_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("non-UTF-8 data path"))?,
+    )
+    .await?;
+    db.init().await?;
+
+    let uploads_dir = data_dir.join("uploads");
+    let storage = FileStorage::new(&uploads_dir).await?;
+
+    let state = AppState {
+        db,
+        storage,
+        chunk_tracker: Arc::new(ChunkTracker::new()),
+        peers: Arc::new(DashMap::new()),
+        peer_channels: Arc::new(DashMap::new()),
+        metrics: ServerMetrics::new(),
+        client_mode: true,
+    };
+
+    // No static file serving needed — the Tauri shell is the UI.
+    let router = build_router(state, "", None);
+
+    let listener =
+        tokio::net::TcpListener::bind(std::net::SocketAddr::from(([127, 0, 0, 1], port))).await?;
+    let addr = listener.local_addr()?;
+
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.ok();
+    });
+
+    Ok((addr, handle.abort_handle()))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
