@@ -48,9 +48,48 @@ impl TestServer {
             peers: Arc::new(DashMap::new()),
             peer_channels: Arc::new(DashMap::new()),
             metrics: ServerMetrics::new(),
+            client_mode: false,
         };
 
         // Use "/tmp" as public_dir — tests don't serve static files.
+        let router = build_router(state, "/tmp", None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        TestServer {
+            base_url: format!("http://127.0.0.1:{port}"),
+            client: Client::new(),
+            _db_dir: db_dir,
+            _storage_dir: storage_dir,
+        }
+    }
+
+    async fn start_as_client() -> Self {
+        let db_dir = TempDir::new().unwrap();
+        let storage_dir = TempDir::new().unwrap();
+
+        let db_path = db_dir.path().join("test.db");
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.init().await.unwrap();
+
+        let storage = FileStorage::new(storage_dir.path().to_str().unwrap())
+            .await
+            .unwrap();
+
+        let state = AppState {
+            db,
+            storage,
+            chunk_tracker: Arc::new(ChunkTracker::new()),
+            peers: Arc::new(DashMap::new()),
+            peer_channels: Arc::new(DashMap::new()),
+            metrics: ServerMetrics::new(),
+            client_mode: true,
+        };
+
         let router = build_router(state, "/tmp", None);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -132,6 +171,18 @@ async fn upload_without_backup_flag_is_rejected() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert!(body["error"].as_str().unwrap().contains("backup=true"));
+}
+
+#[tokio::test]
+async fn client_mode_upload_without_backup_flag_succeeds() {
+    let srv = TestServer::start_as_client().await;
+    let data: Vec<u8> = (0u8..=255).cycle().take(512).collect();
+    let resp = srv.upload("client.bin", data.clone(), false).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "success");
+    let hash = body["hash"].as_str().unwrap();
+    assert_eq!(hash.len(), 64);
 }
 
 #[tokio::test]

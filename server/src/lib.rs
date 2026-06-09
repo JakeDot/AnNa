@@ -69,6 +69,9 @@ pub struct AppState {
     pub peers: Arc<DashMap<String, PeerInfo>>,
     pub peer_channels: Arc<DashMap<String, UnboundedSender<String>>>,
     pub metrics: Arc<ServerMetrics>,
+    /// When true the server is acting as a client node and accepts uploads
+    /// without requiring `?backup=true`.
+    pub client_mode: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -180,6 +183,13 @@ pub async fn run() -> anyhow::Result<()> {
     let chunk_tracker = Arc::new(ChunkTracker::new());
     let metrics = ServerMetrics::new();
 
+    let client_mode = std::env::var("CLIENT_MODE")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+    if client_mode {
+        info!("Running in client mode — backup=true gate is disabled");
+    }
+
     let state = AppState {
         db,
         storage,
@@ -187,6 +197,7 @@ pub async fn run() -> anyhow::Result<()> {
         peers: Arc::new(DashMap::new()),
         peer_channels: Arc::new(DashMap::new()),
         metrics: metrics.clone(),
+        client_mode,
     };
 
     let alt_svc_value = format!(
@@ -279,7 +290,7 @@ async fn upload_file(
     Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResponse>, ErrorResponse> {
-    if query.backup.as_deref() != Some("true") {
+    if !state.client_mode && query.backup.as_deref() != Some("true") {
         return Err(ErrorResponse {
             error: "Direct uploads are disabled. Use ?backup=true to explicitly back up a file."
                 .to_string(),
