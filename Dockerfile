@@ -1,5 +1,5 @@
 # Multi-stage build for Rust server
-FROM rust:1.94-slim as rust-builder
+FROM rust:1.94-slim AS rust-builder
 
 WORKDIR /app/server
 
@@ -19,7 +19,7 @@ COPY server/src ./src
 RUN cargo build --release
 
 # Build client
-FROM node:20-slim as client-builder
+FROM node:20-slim AS client-builder
 
 WORKDIR /app/client
 
